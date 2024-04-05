@@ -1,11 +1,11 @@
-"""Script."""
-from datetime import datetime
-from tradingbot.config import Config
+"""Main Forex Script."""
+from sorul_tradingbot.executable.forex_executable import ForexExecutable
 
 
 def run() -> None:
-  print(datetime.now(Config.local_timezone))
+  """Run the executable object."""
+  ForexExecutable().entry_point()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
   run()
