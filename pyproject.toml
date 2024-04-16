@@ -6,7 +6,7 @@ authors = ["sorul <cromerovargas2d@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = "3.8.1"
-tradingbot = { git = "https://github.com/sorul/tradingbot.git", tag = "v0.12.0" }
+tradingbot = {path="/home/pi/Documents/tradingbot", develop=true}
 
 
 [tool.poetry.dev-dependencies]

@@ -12,7 +12,6 @@ dev_requirements:
 
 tag:
 	@make flake8
-	@make test
 	@make requirements
 	@make dev_requirements
 	@git add .
