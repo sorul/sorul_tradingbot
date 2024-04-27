@@ -78,7 +78,7 @@ python-versions = "*"
 
 [[package]]
 name = "exceptiongroup"
-version = "1.2.0"
+version = "1.2.1"
 description = "Backport of PEP 654 (exception groups)"
 category = "dev"
 optional = false
@@ -125,7 +125,7 @@ flake8 = "*"
 
 [[package]]
 name = "flake8-bugbear"
-version = "24.2.6"
+version = "24.4.26"
 description = "A plugin for flake8 finding likely bugs and design problems in your program. Contains warnings that don't belong in pyflakes and pycodestyle."
 category = "dev"
 optional = false
@@ -354,7 +354,7 @@ test = ["pytest"]
 
 [[package]]
 name = "freezegun"
-version = "1.4.0"
+version = "1.5.0"
 description = "Let your Python tests travel through time"
 category = "dev"
 optional = false
@@ -433,7 +433,7 @@ test = ["hypothesis (>=5.5.3)", "pytest (>=6.0)", "pytest-xdist (>=1.31)"]
 
 [[package]]
 name = "pluggy"
-version = "1.4.0"
+version = "1.5.0"
 description = "plugin and hook calling mechanisms for python"
 category = "dev"
 optional = false
@@ -580,8 +580,8 @@ optional = false
 python-versions = ">=3.7"
 
 [[package]]
-name = "tradingbot"
-version = "0.15.0"
+name = "tradeo"
+version = "0.16.1"
 description = ""
 category = "main"
 optional = false
@@ -596,7 +596,7 @@ requests = "^2.31.0"
 
 [package.source]
 type = "directory"
-url = "../tradingbot"
+url = "../tradeo"
 
 [[package]]
 name = "typing-extensions"
@@ -623,7 +623,7 @@ zstd = ["zstandard (>=0.18.0)"]
 [metadata]
 lock-version = "1.1"
 python-versions = "3.8.1"
-content-hash = "450bc438e6e25ea7bab40bedc95b18e82eb6545d99257ae3e974bffbd06049df"
+content-hash = "0158f49f6bf5e7d00dd6771e794b8360b6707bd44b165211b912da4be2f405cb"
 
 [metadata.files]
 astroid = []
@@ -681,6 +681,6 @@ six = [
 snowballstemmer = []
 stdlib-list = []
 tomli = []
-tradingbot = []
+tradeo = []
 typing-extensions = []
 urllib3 = []

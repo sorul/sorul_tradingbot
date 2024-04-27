@@ -1,12 +1,12 @@
 [tool.poetry]
 name = "sorul_tradingbot"
-version = "0.1.0"
+version = "0.1.1"
 description = ""
 authors = ["sorul <cromerovargas2d@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = "3.8.1"
-tradingbot = {path="/home/pi/Documents/tradingbot", develop=true}
+tradeo = {path="/home/pi/Documents/tradeo", develop=true}
 
 
 [tool.poetry.dev-dependencies]

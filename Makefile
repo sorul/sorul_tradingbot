@@ -10,7 +10,7 @@ requirements:
 dev_requirements:
 	@poetry export --dev -f requirements.txt --output requirements_dev.txt --without-hashes
 
-tag:
+master:
 	@make flake8
 	@make requirements
 	@make dev_requirements
@@ -21,7 +21,6 @@ tag:
 	@git merge --no-edit --log develop
 	@git tag v$$(poetry version -s)
 	@git push
-	@git push --tags
 	@git checkout develop
 	@poetry version
 

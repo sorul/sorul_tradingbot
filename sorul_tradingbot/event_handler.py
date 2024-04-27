@@ -1,8 +1,8 @@
 """Forex Event Handler."""
-from tradingbot.event_handlers.event_handler import EventHandler
-from tradingbot.mt_client import MT_Client
-from tradingbot.config import Config
-from tradingbot.ohlc import OHLC
+from tradeo.event_handlers.event_handler import EventHandler
+from tradeo.mt_client import MT_Client
+from tradeo.config import Config
+from tradeo.ohlc import OHLC
 from datetime import datetime
 
 from sorul_tradingbot.strategy.private.tnt import TNT

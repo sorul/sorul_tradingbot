@@ -1,13 +1,13 @@
 """Forex executable."""
-from tradingbot.executable.executable import Executable
-from tradingbot.files import write_file
-from tradingbot.files import Files
-from tradingbot.utils import reboot_mt
-from tradingbot.config import Config
-from tradingbot.mt_client import MT_Client
-from tradingbot.log import log
-from tradingbot.context_managers.blocker import Blocker
-from tradingbot.utils import (
+from tradeo.executable.executable import Executable
+from tradeo.files import write_file
+from tradeo.files import Files
+from tradeo.utils import reboot_mt
+from tradeo.config import Config
+from tradeo.mt_client import MT_Client
+from tradeo.log import log
+from tradeo.context_managers.blocker import Blocker
+from tradeo.utils import (
     get_consecutive_times_down,
     increment_consecutive_times_down,
     reset_consecutive_times_down, get_last_balance
@@ -126,9 +126,7 @@ class ForexExecutable(Executable):
       rs = mt_client.get_remaining_symbols()
 
     # Check if there are remaining symbols to process
-    if len(rs) > 0:
-      log.warning(f'{len(rs)} remaining symbols to process.')
-    else:
+    if len(rs) == 0:
       reset_consecutive_times_down()
 
     # Check if MT needs to restart
