@@ -6,7 +6,7 @@ authors = ["sorul <cromerovargas2d@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = "3.8.1"
-tradeo = {path="/home/pi/Documents/tradeo", develop=true}
+tradeo = "*"
 
 
 [tool.poetry.dev-dependencies]
