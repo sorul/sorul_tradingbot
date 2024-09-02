@@ -1,37 +1,41 @@
-FROM python:3.8.1-slim-buster
-# FROM arm32v7/python:3.8.1-slim-buster
+FROM ghcr.io/linuxserver/baseimage-kasmvnc:debianbullseye
 
-WORKDIR /app
+# set version label
+ARG BUILD_DATE
+ARG VERSION
+LABEL build_version="Metatrader Docker:- ${VERSION} Build-date:- ${BUILD_DATE}"
+LABEL maintainer="gmartin"
 
-# Install dependecies
-# RUN apt update \ apt-get install -y curl gcc python3-dev libffi-dev
+ENV TITLE=Metatrader5
+ENV WINEPREFIX="/config/.wine"
 
-# Install dependencies
-RUN apt update \
-  && apt-get install -y \
-  python3-venv \
-  python3-dev \
-  libffi-dev \
-  gcc \
-  curl \
-  libssl-dev
+# Update package lists and upgrade packages
+RUN apt-get update && apt-get upgrade -y
 
-# && apt-get install -y pipx && pipx ensurepath
+# Install required packages
+RUN apt-get install -y \
+    python3-pip \
+    wget \
+    && pip3 install --upgrade pip
 
-# variables de entorno de libssl-dev:
-RUN export PKG_CONFIG_PATH=/usr/lib/pkgconfig:$PKG_CONFIG_PATH
-# RUN export OPENSSL_STATIC=1
-# RUN export OPENSSL_LIB_DIR=/usr/lib
-# RUN export OPENSSL_INCLUDE_DIR=/usr/include/openssl
+# Add WineHQ repository key and APT source
+RUN wget -q https://dl.winehq.org/wine-builds/winehq.key \
+    && apt-key add winehq.key \
+    && add-apt-repository 'deb https://dl.winehq.org/wine-builds/debian/ bullseye main' \
+    && rm winehq.key
 
-# RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-# RUN export PATH="$HOME/.cargo/bin:$PATH"
+# Add i386 architecture and update package lists
+RUN dpkg --add-architecture i386 \
+    && apt-get update
 
-# Install poetry
-# RUN pipx install poetry
+# Install WineHQ stable package and dependencies
+RUN apt-get install --install-recommends -y \
+    winehq-stable \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY metatrader/root /
+RUN chmod +x /defaults/docker_mt5_start.sh
 
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY sorul_tradingbot ./sorul_tradingbot
+EXPOSE 3000
+VOLUME /config/.wine
