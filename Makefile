@@ -24,3 +24,7 @@ master:
 	@git checkout develop
 	@poetry version
 
+run_container:
+	@docker build -t sorul_tradingbot .
+	@docker run -d -p 3000:3000 -p 8001:8001 -v config:/config sorul_tradingbot
+

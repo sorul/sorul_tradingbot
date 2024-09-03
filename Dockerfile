@@ -34,8 +34,10 @@ RUN apt-get install --install-recommends -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-COPY metatrader/root /
-RUN chmod +x /defaults/docker_mt5_start.sh
 
-EXPOSE 3000
-VOLUME /config/.wine
+COPY /Metatrader /Metatrader
+RUN chmod +x /Metatrader/docker_mt5_start.sh
+COPY /root /
+
+EXPOSE 3000 8001
+VOLUME /config

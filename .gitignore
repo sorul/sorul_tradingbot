@@ -162,5 +162,5 @@ cython_debug/
 **/strategy/private/*
 !**/strategy/private/__init__.py
 
-metatrader/*
-!metatrader/root/
+# metatrader/*
+# !metatrader/root/
