@@ -5,8 +5,6 @@ services:
     build: .
     container_name: mt5
     volumes:
-      - metatrader:/config
+      - ./metatrader:/config
     ports:
       - 3000:3000
-volumes:
-  metatrader:
