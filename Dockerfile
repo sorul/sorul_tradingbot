@@ -35,9 +35,9 @@ RUN apt-get install --install-recommends -y \
     && rm -rf /var/lib/apt/lists/*
 
 
-COPY /Metatrader /Metatrader
-RUN chmod +x /Metatrader/docker_mt5_start.sh
-COPY /root /
+COPY /metatrader /metatrader
+RUN chmod +x /metatrader/docker_mt5_start.sh
+COPY /metatrader/root /
 
 EXPOSE 3000 8001
 VOLUME /config

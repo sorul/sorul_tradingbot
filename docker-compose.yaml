@@ -1,18 +1,12 @@
 version: '3'
 
 services:
-  metatrader:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: sorul_tradingbot:latest
-    container_name: sorul_tradingbot
-    ports:
-      - "3000:3000"
+  mt5:
+    build: .
+    container_name: mt5
     volumes:
-      - ./metatrader:/config/.wine
-    # environment:
-    #   - PUID=911
-    #   - PGID=1000
-    #   - TZ=Europe/Madrid
-    restart: unless-stopped
+      - metatrader:/config
+    ports:
+      - 3000:3000
+volumes:
+  metatrader:

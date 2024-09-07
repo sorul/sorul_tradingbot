@@ -25,6 +25,6 @@ master:
 	@poetry version
 
 run_container:
+	@sh ../MetaTrader5-Docker-Image/stop.sh
 	@docker build -t sorul_tradingbot .
-	@docker run -d -p 3000:3000 -p 8001:8001 -v config:/config sorul_tradingbot
-
+	@docker run --name sorul_tradingbot -d -p 3000:3000 -v ./metatrader:/config sorul_tradingbot
