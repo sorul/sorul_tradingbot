@@ -24,7 +24,5 @@ master:
 	@git checkout develop
 	@poetry version
 
-run_container:
-	@sh ../MetaTrader5-Docker-Image/stop.sh
-	@docker build -t sorul_tradingbot .
-	@docker run --name sorul_tradingbot -d -p 3000:3000 -v ./metatrader:/config sorul_tradingbot
+run_docker:
+	docker compose up -d
