@@ -24,7 +24,7 @@ class ForexEventHandler(EventHandler):
     """Handle the return of GET_HISTORICAL_DATA command."""
     now_date = datetime.now(Config.utc_timezone)
     strategy = TNT()
-    possible_order = strategy.indicator(data, symbol, now_date)
+    possible_order = strategy.indicator(data, symbol, now_date, mt_client)
     if possible_order and strategy.check_order_viability(
             mt_client, possible_order):
       mt_client.create_new_order(possible_order)
