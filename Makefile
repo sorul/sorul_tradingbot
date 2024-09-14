@@ -1,5 +1,5 @@
 flake8:
-	@flake8 --config config/tox.ini
+	@poetry run flake8 --config config/tox.ini
 
 test:
 	@poetry run pytest
@@ -10,7 +10,7 @@ requirements:
 dev_requirements:
 	@poetry export --dev -f requirements.txt --output requirements_dev.txt --without-hashes
 
-master:
+tag:
 	@make flake8
 	@make requirements
 	@make dev_requirements
