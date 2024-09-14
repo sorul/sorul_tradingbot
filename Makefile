@@ -26,3 +26,6 @@ master:
 
 run_docker:
 	docker compose up -d
+
+stop_docker:
+	docker compose down

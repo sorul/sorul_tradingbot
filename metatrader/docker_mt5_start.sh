@@ -69,6 +69,7 @@ fi
 # Recheck if MetaTrader 5 is installed
 if [ -e "$mt5file" ]; then
     show_message "[4/4] File $mt5file is installed. Running MT5..."
+    chmod -R 777 "/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts/Advisors"
     $wine_executable "$mt5file" &
 else
     show_message "[4/4] File $mt5file is not installed. MT5 cannot be run."

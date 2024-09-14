@@ -161,6 +161,7 @@ cython_debug/
 # Project-specific files
 **/strategy/private/*
 !**/strategy/private/__init__.py
+memo.md
 
 metatrader/*
 !metatrader/root/

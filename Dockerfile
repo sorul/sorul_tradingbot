@@ -39,5 +39,5 @@ COPY /metatrader /metatrader
 RUN chmod +x /metatrader/docker_mt5_start.sh
 COPY /metatrader/root /
 
-EXPOSE 3000 8001
+EXPOSE 3000
 VOLUME /config

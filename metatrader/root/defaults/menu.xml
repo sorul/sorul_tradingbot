@@ -3,5 +3,6 @@
 <menu id="root-menu" label="MENU">
 <item label="xterm" icon="/usr/share/pixmaps/xterm-color_48x48.xpm"><action name="Execute"><command>/usr/bin/xterm</command></action></item>
 <item label="metatrader 5" icon="/config/.wine/drive_c/Program Files/MetaTrader 5/Terminal.ico"><action name="Execute"><command>/usr/bin/wine "/config/.wine/drive_c/Program Files/MetaTrader 5/terminal64.exe"</command></action></item>
+<item label="metaeditor" icon="/config/.wine/drive_c/Program Files/MetaTrader 5/Terminal.ico"><action name="Execute"><command>/usr/bin/wine "/config/.wine/drive_c/Program Files/MetaTrader 5/MetaEditor64.exe"</command></action></item>
 </menu>
 </openbox_menu>
