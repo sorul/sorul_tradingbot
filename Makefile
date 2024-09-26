@@ -1,14 +1,14 @@
 flake8:
-	@poetry run flake8 --config config/tox.ini
+	poetry run flake8 --config config/tox.ini
 
 test:
-	@poetry run pytest
+	poetry run pytest
 
 requirements:
-	@poetry export -f requirements.txt --output requirements.txt --without-hashes
+	poetry export -f requirements.txt --output requirements.txt --without-hashes
 
 dev_requirements:
-	@poetry export --dev -f requirements.txt --output requirements_dev.txt --without-hashes
+	poetry export --dev -f requirements.txt --output requirements_dev.txt --without-hashes
 
 tag:
 	@make flake8

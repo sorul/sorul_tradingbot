@@ -1,7 +1,15 @@
 version: '3'
 
 services:
+  binfmt_misc:
+    image: tonistiigi/binfmt
+    command: --install amd64
+    privileged: true
+    restart: "no"
+
   mt5:
+    depends_on:
+      - binfmt_misc
     build: .
     container_name: mt5
     volumes:

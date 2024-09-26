@@ -1,4 +1,4 @@
-FROM ghcr.io/linuxserver/baseimage-kasmvnc:debianbullseye
+FROM ghcr.io/linuxserver/baseimage-kasmvnc:debianbookworm
 
 # set version label
 ARG BUILD_DATE
@@ -12,28 +12,29 @@ ENV WINEPREFIX="/config/.wine"
 # Update package lists and upgrade packages
 RUN apt-get update && apt-get upgrade -y
 
-# Install required packages
+# Instalar dependencias del sistema
 RUN apt-get install -y \
-    python3-pip \
-    wget \
-    && pip3 install --upgrade pip
+  python3-pip \
+  python3-venv \
+  wget \
+  curl
 
-# Add WineHQ repository key and APT source
-RUN wget -q https://dl.winehq.org/wine-builds/winehq.key \
-    && apt-key add winehq.key \
-    && add-apt-repository 'deb https://dl.winehq.org/wine-builds/debian/ bullseye main' \
-    && rm winehq.key
+# Crear y activar un entorno virtual
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-# Add i386 architecture and update package lists
-RUN dpkg --add-architecture i386 \
-    && apt-get update
+# Actualizar pip dentro del entorno virtual
+RUN pip install --upgrade pip
 
-# Install WineHQ stable package and dependencies
-RUN apt-get install --install-recommends -y \
-    winehq-stable \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+# Instalar Wine64 y sus dependencias
+RUN dpkg --add-architecture amd64 && apt-get update && \
+    apt-get install -y wine64:amd64 libwine:amd64
 
+# Crear el directorio de Wine y configurar el entorno de Wine64
+RUN mkdir -p ${WINEPREFIX} && winecfg
+
+# Limpiar la cache de apt
+RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY /metatrader /metatrader
 RUN chmod +x /metatrader/docker_mt5_start.sh
