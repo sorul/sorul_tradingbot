@@ -3,7 +3,7 @@ version: '3'
 services:
   binfmt_misc:
     image: tonistiigi/binfmt
-    command: --install amd64
+    command: --install all
     privileged: true
     restart: "no"
 
