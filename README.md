@@ -25,12 +25,16 @@ Click on compile, and a new file with the .ex5 extension will be created.
 6) Activate the expert in any symbol chart, it does not matter which chart you use. 
 But only in one of them.
 
+## Environment variables
+We copy the ".env" file suggested by the 
+[README](https://github.com/sorul/tradeo?tab=readme-ov-file#execution-of-your-project-if-you-import-this-library) 
+of the Tadeo library.
+
 ## How I execute the project
 
 I edit de crontab (crontab -e):
 
 ```console
-@reboot make -f /home/pi/sorul_tradingbot/Makefile run_docker
-
-*/5 * * * 0-5 /home/pi/sorul_tradingbot/scripts/main_forex.sh >> /tmp/crontab_script_log.txt 2>&1
+@reboot cd ~/git/sorul_tradingbot/ && make run_docker
+*/5 * * * 0-5 cd ~/git/sorul_tradingbot/ && make run_forex
 ```

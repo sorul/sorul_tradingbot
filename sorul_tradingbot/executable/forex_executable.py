@@ -32,9 +32,12 @@ class ForexExecutable(Executable):
     if not self.is_locked() and self.check_time_viability():
       mt_client = MT_Client(event_handler=ForexEventHandler())
       try:
-        with Blocker(name=self.name):
+        block = Blocker(name=self.name)
+        with block:
           self.main(mt_client)
       except Exception:  # noqa
+        # Remove block
+        block.remove_block()
         # Finish the bot
         self.finish(mt_client)
         # Log the error
@@ -118,6 +121,7 @@ class ForexExecutable(Executable):
     while len(rs) > 0 and datetime.now(Config.utc_timezone) < stop_condition:
       # Get randomly the next symbol
       next_symbol = rs[randrange(len(rs))]
+      log.debug(f'next_symbol: {next_symbol}')
 
       # Check if JSON data is available to trigger the event
       mt_client.check_historical_data(next_symbol)

@@ -11,7 +11,8 @@ RUN apt-get install -y \
   python3-pip \
   python3-venv \
   wget \
-  curl
+  curl \
+  xvfb
 
 # Crear y activar un entorno virtual
 RUN python3 -m venv /opt/venv

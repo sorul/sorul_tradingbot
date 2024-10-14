@@ -39,6 +39,16 @@ is_wine_python_package_installed() {
 check_dependency "curl"
 check_dependency "$wine_executable"
 
+
+# Check if the USE_XVFB variable is set to "true"
+if [ "$USE_XVFB" = "true" ]; then
+  echo "Starting Xvfb..."
+  Xvfb :10 -screen 0 800x600x16 &
+  export DISPLAY=:10.0
+else
+  echo "Xvfb will not start. USE_XVFB variable is not set or is false."
+fi
+
 # Install Mono if not present
 if [ ! -e "/config/.wine/drive_c/windows/mono" ]; then
     show_message "[1/4] Downloading and installing Mono..."

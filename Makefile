@@ -1,3 +1,5 @@
+SHELL := /bin/bash
+
 flake8:
 	poetry run flake8 --config config/tox.ini
 
@@ -29,3 +31,6 @@ run_docker:
 
 stop_docker:
 	docker compose down
+
+run_forex:
+	source .env && ~/.local/bin/poetry run run_forex
