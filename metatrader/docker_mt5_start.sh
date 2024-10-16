@@ -41,12 +41,12 @@ check_dependency "$wine_executable"
 
 
 # Check if the USE_XVFB variable is set to "true"
-if [ "$USE_XVFB" = "true" ]; then
+if [ "$MT_BACKGROUND" = "true" ]; then
   echo "Starting Xvfb..."
   Xvfb :10 -screen 0 800x600x16 &
   export DISPLAY=:10.0
 else
-  echo "Xvfb will not start. USE_XVFB variable is not set or is false."
+  echo "Xvfb will not start. MT_BACKGROUND variable is not set or is false."
 fi
 
 # Install Mono if not present

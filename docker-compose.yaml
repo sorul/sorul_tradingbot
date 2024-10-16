@@ -13,6 +13,6 @@ services:
     volumes:
       - ./metatrader:/config
     environment:
-      - MT_BACKGROUND=false
+      - MT_BACKGROUND=true
     ports:
       - 3000:3000
