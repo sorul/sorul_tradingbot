@@ -26,7 +26,7 @@ tag:
 	@git checkout develop
 	@poetry version
 
-run_docker:
+start_docker:
 	docker compose up -d
 
 stop_docker:

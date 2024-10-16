@@ -35,6 +35,5 @@ of the Tadeo library.
 I edit de crontab (crontab -e):
 
 ```console
-@reboot cd ~/git/sorul_tradingbot/ && make run_docker
 */5 * * * 0-5 cd ~/git/sorul_tradingbot/ && make run_forex
 ```
