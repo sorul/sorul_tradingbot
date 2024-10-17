@@ -15,6 +15,7 @@ from tradeo.utils import (
 from datetime import datetime, timedelta
 from random import randrange
 import traceback
+import subprocess
 
 from sorul_tradingbot.event_handler import ForexEventHandler
 from sorul_tradingbot.strategy.private.tnt import TNT
@@ -132,9 +133,11 @@ class ForexExecutable(Executable):
     # Check if there are remaining symbols to process
     if len(rs) == 0:
       reset_consecutive_times_down()
+    else:
+      log.warning(f'Remaining pairs: {rs}')
 
     # Check if MT needs to restart
-    self._check_mt_needs_to_restart(len(rs))
+    # self._check_mt_needs_to_restart(len(rs))
 
   def _send_profit_message(
           self, mt_client: MT_Client, local_date: datetime) -> bool:
@@ -156,9 +159,29 @@ class ForexExecutable(Executable):
     ctd = get_consecutive_times_down()
     symbols_len = len(Config.symbols)
     if n_remaining_symbols > int(symbols_len / 2) and ctd > 4:
-      reboot_mt()
+      self._reboot_mt()
     else:
       increment_consecutive_times_down()
+
+  def _reboot_mt(self) -> None:
+    log.warning('Rebooting MetaTrader ...')
+
+    # Stoping container
+    result = subprocess.run(
+      ["make", "stop_docker"],
+      capture_output=True, text=True
+    )
+    if result.stderr:
+      log.error(f'stop_docker: {result.stderr}')
+    
+    # Stoping container
+    result = subprocess.run(
+      ["make", "start_docker"],
+      capture_output=True, text=True
+    )
+    if result.stderr:
+      log.error(f'start_docker: {result.stderr}')
+
 
   def is_locked(self) -> bool:
     """Return True if the forex-bot is running."""

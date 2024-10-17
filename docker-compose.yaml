@@ -3,7 +3,7 @@ services:
     image: tonistiigi/binfmt
     command: --install all
     privileged: true
-    restart: always
+    restart: no
 
   mt5:
     depends_on:
@@ -13,12 +13,12 @@ services:
     volumes:
       - ./metatrader:/config
     environment:
-      - MT_BACKGROUND=true
+      - MT_BACKGROUND=false # There is no difference in terms of performance
     ports:
       - 3000:3000
-    restart: always
+    restart: on-failure
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: "2G"
+          cpus: "2"
+          memory: "3G"

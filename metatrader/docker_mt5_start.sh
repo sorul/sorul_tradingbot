@@ -40,7 +40,8 @@ check_dependency "curl"
 check_dependency "$wine_executable"
 
 
-# Check if the USE_XVFB variable is set to "true"
+# Check if the MT_BACKGROUND variable is set to "true"
+# To run MT in background without a graphic terminal
 if [ "$MT_BACKGROUND" = "true" ]; then
   echo "Starting Xvfb..."
   Xvfb :10 -screen 0 800x600x16 &
