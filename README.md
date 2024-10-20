@@ -17,8 +17,8 @@ If a connection error occurs on Debian, run the "make run_docker" command again.
 1) Log in to your broker account.
 2) Add the symbols you want to trade. 
 There is the option for the bot to open them automatically, but I do not recommend it.
-3) Download [mt_tb_expert](https://raw.githubusercontent.com/sorul/tradeo/refs/heads/master/tradeo/mt_tb_expert.mq5) 
-file and put it in the proper directory: ./metatrader/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts/Advisors/mt_tb_expert.mq5
+3) Download [mt_tb_expert.ex5](https://github.com/sorul/tradeo/raw/refs/heads/master/docs/files/mt_tb_expert.ex5)
+file and put it in the proper directory: ./metatrader/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts/Advisors/mt_tb_expert.ex5
 4) Open MetaEditor using the right-click on the remote desktop. 
 Click on compile, and a new file with the .ex5 extension will be created.
 5) Activate the "Algo Trading" button at the top of MetaTrader.
@@ -35,5 +35,6 @@ of the Tadeo library.
 I edit de crontab (crontab -e):
 
 ```console
+@reboot cd ~/git/sorul_tradingbot/ && make start_docker
 */5 * * * 0-5 cd ~/git/sorul_tradingbot/ && make run_forex
 ```
