@@ -4,6 +4,7 @@ from tradeo.mt_client import MT_Client
 from tradeo.config import Config
 from tradeo.ohlc import OHLC
 from datetime import datetime
+from tradeo.log import log
 
 from sorul_tradingbot.strategy.private.tnt import TNT
 
@@ -22,6 +23,7 @@ class ForexEventHandler(EventHandler):
           data: OHLC
   ) -> None:
     """Handle the return of GET_HISTORICAL_DATA command."""
+    log.debug(f'{symbol} -> {data}')
     now_date = datetime.now(Config.utc_timezone)
     strategy = TNT()
     possible_order = strategy.indicator(data, symbol, now_date, mt_client)

@@ -2,11 +2,10 @@
 from tradeo.executable.executable import Executable
 from tradeo.files import write_file
 from tradeo.files import Files
-from tradeo.utils import reboot_mt
 from tradeo.config import Config
 from tradeo.mt_client import MT_Client
 from tradeo.log import log
-from tradeo.context_managers.blocker import Blocker
+from tradeo.blocker import Blocker
 from tradeo.utils import (
     get_consecutive_times_down,
     increment_consecutive_times_down,
@@ -30,15 +29,12 @@ class ForexExecutable(Executable):
 
   def entry_point(self):
     """Entry point of the forex bot."""
-    if not self.is_locked() and self.check_time_viability():
+    if self.check_time_viability():
       mt_client = MT_Client(event_handler=ForexEventHandler())
       try:
-        block = Blocker(name=self.name)
-        with block:
+        with Blocker(lockfile=self.name):
           self.main(mt_client)
       except Exception:  # noqa
-        # Remove block
-        block.remove_block()
         # Finish the bot
         self.finish(mt_client)
         # Log the error
@@ -137,7 +133,7 @@ class ForexExecutable(Executable):
       log.warning(f'Remaining pairs: {rs}')
 
     # Check if MT needs to restart
-    # self._check_mt_needs_to_restart(len(rs))
+    self._check_mt_needs_to_restart(len(rs))
 
   def _send_profit_message(
           self, mt_client: MT_Client, local_date: datetime) -> bool:
@@ -168,24 +164,19 @@ class ForexExecutable(Executable):
 
     # Stoping container
     result = subprocess.run(
-      ["make", "stop_docker"],
-      capture_output=True, text=True
+        ['make', 'stop_docker'],
+        capture_output=True, text=True
     )
     if result.stderr:
       log.error(f'stop_docker: {result.stderr}')
-    
+
     # Stoping container
     result = subprocess.run(
-      ["make", "start_docker"],
-      capture_output=True, text=True
+        ['make', 'start_docker'],
+        capture_output=True, text=True
     )
     if result.stderr:
       log.error(f'start_docker: {result.stderr}')
-
-
-  def is_locked(self) -> bool:
-    """Return True if the forex-bot is running."""
-    return Blocker(name=self.name).is_blocked()
 
   def check_time_viability(self) -> bool:
     """Check if the forex bot is viable to run."""
