@@ -20,5 +20,5 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2"
+          cpus: "2.5"
           memory: "3G"

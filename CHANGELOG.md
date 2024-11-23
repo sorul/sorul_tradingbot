@@ -1,14 +1,14 @@
 # CHANGELOG
 
-## V0.2.0  (14/09/2024)
-- feat:
-  - Dockerfile to run metatrader.
+## V0.2.0 (2024/11/23)
+- refactor:
+  - Metatrader running in docker
 
-## V0.1.1  (27/04/2024)
+## V0.1.1
 - refactor:
   - Updating tradingbot to tradeo package.
 
-## V0.1.0  (16/04/2024)
+## V0.1.0
 - feat:
   - TNT private strategy.
   - A main executable for forex bot.

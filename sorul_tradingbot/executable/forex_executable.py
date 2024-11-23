@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from random import randrange
 import traceback
 import subprocess
+from time import sleep
 
 from sorul_tradingbot.event_handler import ForexEventHandler
 from sorul_tradingbot.strategy.private.tnt import TNT
@@ -32,7 +33,7 @@ class ForexExecutable(Executable):
     if self.check_time_viability():
       mt_client = MT_Client(event_handler=ForexEventHandler())
       try:
-        with Blocker(lockfile=self.name):
+        with Blocker(lockfile=f'/tmp/{self.name}.lock'):
           self.main(mt_client)
       except Exception:  # noqa
         # Finish the bot
@@ -127,10 +128,8 @@ class ForexExecutable(Executable):
       rs = mt_client.get_remaining_symbols()
 
     # Check if there are remaining symbols to process
-    if len(rs) == 0:
+    if len(rs) < int(len(Config.symbols) / 2):
       reset_consecutive_times_down()
-    else:
-      log.warning(f'Remaining pairs: {rs}')
 
     # Check if MT needs to restart
     self._check_mt_needs_to_restart(len(rs))
@@ -154,29 +153,26 @@ class ForexExecutable(Executable):
     """Check if MT needs to restart."""
     ctd = get_consecutive_times_down()
     symbols_len = len(Config.symbols)
-    if n_remaining_symbols > int(symbols_len / 2) and ctd > 4:
+    if n_remaining_symbols > int(symbols_len / 2) and ctd > 2:
       self._reboot_mt()
+      reset_consecutive_times_down()
     else:
       increment_consecutive_times_down()
 
   def _reboot_mt(self) -> None:
     log.warning('Rebooting MetaTrader ...')
 
-    # Stoping container
-    result = subprocess.run(
+    subprocess.run(
         ['make', 'stop_docker'],
         capture_output=True, text=True
     )
-    if result.stderr:
-      log.error(f'stop_docker: {result.stderr}')
-
-    # Stoping container
-    result = subprocess.run(
+    sleep(5)
+    subprocess.run(
         ['make', 'start_docker'],
         capture_output=True, text=True
     )
-    if result.stderr:
-      log.error(f'start_docker: {result.stderr}')
+
+    sleep(180)
 
   def check_time_viability(self) -> bool:
     """Check if the forex bot is viable to run."""

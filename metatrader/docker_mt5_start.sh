@@ -1,13 +1,10 @@
 #!/bin/bash
 
 # Configuration variables
-mt5file='/config/.wine/drive_c/Program Files/MetaTrader 5/terminal64.exe'
-WINEPREFIX='/config/.wine'
+WINEPREFIX="/config/.wine"
+mt5file="$WINEPREFIX/drive_c/Program Files/MetaTrader 5/terminal64.exe"
 wine_executable="wine"
-metatrader_version="5.0.36"
-mt5server_port="8001"
 mono_url="https://dl.winehq.org/wine/wine-mono/8.0.0/wine-mono-8.0.0-x86.msi"
-python_url="https://www.python.org/ftp/python/3.9.0/python-3.9.0.exe"
 mt5setup_url="https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
 
 # Function to display a graphical message
@@ -21,18 +18,6 @@ check_dependency() {
         echo "$1 is not installed. Please install it to continue."
         exit 1
     fi
-}
-
-# Function to check if a Python package is installed
-is_python_package_installed() {
-    python3 -c "import pkg_resources; exit(not pkg_resources.require('$1'))" 2>/dev/null
-    return $?
-}
-
-# Function to check if a Python package is installed in Wine
-is_wine_python_package_installed() {
-    $wine_executable python -c "import pkg_resources; exit(not pkg_resources.require('$1'))" 2>/dev/null
-    return $?
 }
 
 # Check for necessary dependencies
