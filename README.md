@@ -27,7 +27,7 @@ There is the option for the bot to open them automatically, but I do not recomme
 3) Locate the data folder. To do so, you need to go to File > Open Data Folder.
 Copy the last folder name, for example: D0E8209F77C8CF37AD8BF550E51FF075
 4) Download [mt_tb_expert.ex5](https://github.com/sorul/tradeo/raw/refs/heads/master/docs/files/mt_tb_expert.ex5)
-file and put it in the proper directory: ./metatrader/.wine/drive_c/users/abc/AppData/Roaming/MetaQuotes/Terminal/D0E8209F77C8CF37AD8BF550E51FF075/MQL5/Experts/Advisors/mt_tb_expert.ex5
+file. This expert is used by the Tradeo library to communicate with MetaTrader; it does not execute trades on its own unless instructed by the user.  Put the file in the proper directory: ./metatrader/.wine/drive_c/users/abc/AppData/Roaming/MetaQuotes/Terminal/D0E8209F77C8CF37AD8BF550E51FF075/MQL5/Experts/Advisors/mt_tb_expert.ex5
 5) Activate the "Algo Trading" button at the top of MetaTrader.
 6) Double click in the expert to activate it in any symbol chart (e.g. USCAD, M5), it does not matter which chart you use. But only in one of them.
 
