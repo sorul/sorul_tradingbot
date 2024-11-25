@@ -23,7 +23,6 @@ class ForexEventHandler(EventHandler):
           data: OHLC
   ) -> None:
     """Handle the return of GET_HISTORICAL_DATA command."""
-    log.debug(f'{symbol} -> {data}')
     now_date = datetime.now(Config.utc_timezone)
     strategy = TNT()
     possible_order = strategy.indicator(data, symbol, now_date, mt_client)
