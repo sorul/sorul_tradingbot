@@ -3,10 +3,12 @@ from tradeo.event_handlers.event_handler import EventHandler
 from tradeo.mt_client import MT_Client
 from tradeo.config import Config
 from tradeo.ohlc import OHLC
+from tradeo.strategies.strategy import Strategy
 from datetime import datetime
-from tradeo.log import log
+from typing import List
 
 from sorul_tradingbot.strategy.private.tnt import TNT
+from sorul_tradingbot.strategy.private.volume import Volume
 
 
 class ForexEventHandler(EventHandler):
@@ -14,7 +16,7 @@ class ForexEventHandler(EventHandler):
 
   def __init__(self):
     """Initialize the attributes."""
-    super().__init__('BasicEventHandler')
+    super().__init__('ForexEventHandler')
 
   def on_historical_data(
           self,
@@ -24,8 +26,11 @@ class ForexEventHandler(EventHandler):
   ) -> None:
     """Handle the return of GET_HISTORICAL_DATA command."""
     now_date = datetime.now(Config.utc_timezone)
-    strategy = TNT()
-    possible_order = strategy.indicator(data, symbol, now_date, mt_client)
-    if possible_order and strategy.check_order_viability(
-            mt_client, possible_order):
-      mt_client.create_new_order(possible_order)
+    strategies: List[Strategy] = [
+        # TNT(mt_client),
+        Volume(mt_client)
+    ]
+    for strategy in strategies:
+      possible_order = strategy.indicator(data, symbol, now_date)
+      if possible_order and strategy.check_order_viability(possible_order):
+        mt_client.create_new_order(possible_order)

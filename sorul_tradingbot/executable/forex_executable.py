@@ -4,6 +4,7 @@ from tradeo.files import write_file
 from tradeo.files import Files
 from tradeo.config import Config
 from tradeo.mt_client import MT_Client
+from tradeo.strategies.strategy import Strategy
 from tradeo.log import log
 from tradeo.blocker import Blocker
 from tradeo.utils import (
@@ -16,9 +17,11 @@ from random import randrange
 import traceback
 import subprocess
 from time import sleep
+from typing import List
 
 from sorul_tradingbot.event_handler import ForexEventHandler
 from sorul_tradingbot.strategy.private.tnt import TNT
+from sorul_tradingbot.strategy.private.volume import Volume
 
 
 class ForexExecutable(Executable):
@@ -89,12 +92,16 @@ class ForexExecutable(Executable):
   def handle_trades(self, mt_client: MT_Client) -> None:
     """Handle the existing trades."""
     orders = mt_client.check_open_orders()
-    strategy = TNT()
-    for order in orders:
-      if order.order_type.pending:
-        strategy.handle_pending_orders(mt_client, order)
-      elif order.order_type.market:
-        strategy.handle_filled_orders(mt_client, order)
+    strategies: List[Strategy] = [
+        # TNT(mt_client),
+        Volume(mt_client)
+    ]
+    for strategy in strategies:
+      for order in orders:
+        if order.order_type.pending:
+          strategy.handle_pending_orders(order)
+        elif order.order_type.market:
+          strategy.handle_filled_orders(order)
 
     len_orders = len(orders)
     message = f'Number of open orders: {len_orders}'
@@ -119,7 +126,6 @@ class ForexExecutable(Executable):
     while len(rs) > 0 and datetime.now(Config.utc_timezone) < stop_condition:
       # Get randomly the next symbol
       next_symbol = rs[randrange(len(rs))]
-      log.debug(f'next_symbol: {next_symbol}')
 
       # Check if JSON data is available to trigger the event
       mt_client.check_historical_data(next_symbol)
@@ -128,11 +134,11 @@ class ForexExecutable(Executable):
       rs = mt_client.get_remaining_symbols()
 
     # Check if there are remaining symbols to process
-    if len(rs) < int(len(Config.symbols) / 2):
+    if len(rs) <= int(len(Config.symbols) / 2):
       reset_consecutive_times_down()
-
-    # Check if MT needs to restart
-    self._check_mt_needs_to_restart(len(rs))
+    else:
+      # Check if MT needs to restart
+      self._check_mt_needs_to_restart(len(rs))
 
   def _send_profit_message(
           self, mt_client: MT_Client, local_date: datetime) -> bool:
@@ -153,7 +159,7 @@ class ForexExecutable(Executable):
     """Check if MT needs to restart."""
     ctd = get_consecutive_times_down()
     symbols_len = len(Config.symbols)
-    if n_remaining_symbols > int(symbols_len / 2) and ctd > 2:
+    if n_remaining_symbols > int(symbols_len / 2) and ctd > 5:
       self._reboot_mt()
       reset_consecutive_times_down()
     else:
@@ -166,7 +172,7 @@ class ForexExecutable(Executable):
         ['make', 'stop_docker'],
         capture_output=True, text=True
     )
-    sleep(5)
+    sleep(10)
     subprocess.run(
         ['make', 'start_docker'],
         capture_output=True, text=True
@@ -192,5 +198,5 @@ class ForexExecutable(Executable):
         e for e in errors if e.error_type != 'WRONG_FORMAT_START_IDENTIFIER'
     ]
     if len(white_list) > 0:
-      log.warning(f'Messages: {errors}')
+      log.warning(f'Messages: {" | ".join(str(e) for e in errors)}')
     log.debug('Forex bot finished!')
