@@ -3,6 +3,7 @@ from tradeo.event_handlers.event_handler import EventHandler
 from tradeo.mt_client import MT_Client
 from tradeo.config import Config
 from tradeo.ohlc import OHLC
+from tradeo.log import log
 from tradeo.strategies.strategy import Strategy
 from datetime import datetime
 from typing import List

@@ -4,7 +4,6 @@ from tradeo.files import write_file
 from tradeo.files import Files
 from tradeo.config import Config
 from tradeo.mt_client import MT_Client
-from tradeo.strategies.strategy import Strategy
 from tradeo.log import log
 from tradeo.blocker import Blocker
 from tradeo.utils import (
@@ -20,8 +19,7 @@ from time import sleep
 from typing import List
 
 from sorul_tradingbot.event_handler import ForexEventHandler
-from sorul_tradingbot.strategy.private.tnt import TNT
-from sorul_tradingbot.strategy.private.volume import Volume
+from sorul_tradingbot.strategy_factory import strategy_factory
 
 
 class ForexExecutable(Executable):
@@ -29,7 +27,7 @@ class ForexExecutable(Executable):
 
   def __init__(self):
     """Initialize the forex bot."""
-    self.name = 'BasicForex'
+    self.name = 'SorulBot'
 
   def entry_point(self):
     """Entry point of the forex bot."""
@@ -92,16 +90,12 @@ class ForexExecutable(Executable):
   def handle_trades(self, mt_client: MT_Client) -> None:
     """Handle the existing trades."""
     orders = mt_client.check_open_orders()
-    strategies: List[Strategy] = [
-        # TNT(mt_client),
-        Volume(mt_client)
-    ]
-    for strategy in strategies:
-      for order in orders:
-        if order.order_type.pending:
-          strategy.handle_pending_orders(order)
-        elif order.order_type.market:
-          strategy.handle_filled_orders(order)
+    for order in orders:
+      strategy = strategy_factory(mt_client, strategy_name=order.comment)
+      if order.order_type.pending:
+        strategy.handle_pending_orders(order)
+      elif order.order_type.market:
+        strategy.handle_filled_orders(order)
 
     len_orders = len(orders)
     message = f'Number of open orders: {len_orders}'
@@ -147,7 +141,7 @@ class ForexExecutable(Executable):
     last_balance = get_last_balance()
     difference = balance - last_balance
     emoji = '🚀' if difference >= 0 else '☔'
-    message_condition = local_date.hour % 12 == 0 and local_date.minute == 5
+    message_condition = local_date.hour == 12 and local_date.minute == 5
     if message_condition and balance != -1:
       log.info(f'{emoji} {difference:.2f} €')
       write_file(Files.LAST_BALANCE.value, str(balance))
