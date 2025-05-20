@@ -3,12 +3,10 @@ from tradeo.event_handlers.event_handler import EventHandler
 from tradeo.mt_client import MT_Client
 from tradeo.config import Config
 from tradeo.ohlc import OHLC
-from tradeo.log import log
 from tradeo.strategies.strategy import Strategy
 from datetime import datetime
 from typing import List
 
-from sorul_tradingbot.strategy.private.tnt import TNT
 from sorul_tradingbot.strategy.private.volume import Volume
 
 
@@ -28,7 +26,6 @@ class ForexEventHandler(EventHandler):
     """Handle the return of GET_HISTORICAL_DATA command."""
     now_date = datetime.now(Config.utc_timezone)
     strategies: List[Strategy] = [
-        # TNT(mt_client),
         Volume(mt_client)
     ]
     for strategy in strategies:

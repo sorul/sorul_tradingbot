@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v0.2.1 (2025/05/20)
+- fix:
+	- Update setuptools dev dependecy to 80.8.0 version for fixing vulnerability issue.
+
 ## V0.2.0 (2024/11/23)
 - refactor:
   - Metatrader running in docker

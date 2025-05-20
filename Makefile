@@ -7,10 +7,12 @@ test:
 	poetry run pytest
 
 requirements:
+	poetry lock
 	poetry export -f requirements.txt --output requirements.txt --without-hashes
 
 dev_requirements:
-	poetry export --dev -f requirements.txt --output requirements_dev.txt --without-hashes
+	poetry lock
+	poetry export --with dev -f requirements.txt --output requirements_dev.txt --without-hashes
 
 tag:
 	@make flake8

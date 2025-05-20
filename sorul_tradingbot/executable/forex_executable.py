@@ -16,7 +16,6 @@ from random import randrange
 import traceback
 import subprocess
 from time import sleep
-from typing import List
 
 from sorul_tradingbot.event_handler import ForexEventHandler
 from sorul_tradingbot.strategy_factory import strategy_factory
