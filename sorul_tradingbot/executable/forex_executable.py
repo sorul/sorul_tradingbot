@@ -91,10 +91,14 @@ class ForexExecutable(Executable):
     orders = mt_client.check_open_orders()
     for order in orders:
       strategy = strategy_factory(mt_client, strategy_name=order.comment)
-      if order.order_type.pending:
-        strategy.handle_pending_orders(order)
-      elif order.order_type.market:
-        strategy.handle_filled_orders(order)
+      if strategy is None:
+        mt_client.send_close_order_command(order.ticket)
+        log.warning(f'No strategy found for order: {order}. Closing it.')
+      else:
+        if order.order_type.pending:
+          strategy.handle_pending_orders(order)
+        elif order.order_type.market:
+          strategy.handle_filled_orders(order)
 
     len_orders = len(orders)
     message = f'Number of open orders: {len_orders}'

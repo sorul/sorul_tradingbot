@@ -3,17 +3,17 @@ from typing import Optional
 from tradeo.strategies.strategy import Strategy
 from tradeo.log import log
 from tradeo.mt_client import MT_Client
-
+6
 
 def strategy_factory(
     mt_client: MT_Client,
-    strategy_name: str,
+   strategy_name: str,
 ) -> Optional[Strategy]:
   """Given a strategy name, return the corresponding strategy object."""
   from sorul_tradingbot.strategy.private.tnt import TNT
   from sorul_tradingbot.strategy.private.volume_07 import Volume as Volume07
   from sorul_tradingbot.strategy.private.volume_08 import Volume as Volume08
-  from sorul_tradingbot.strategy.private.volume_09 import Volume as Volume09
+  from sorul_tradingbot.strategy.private.volume_08 import Volume as Volume09
 
   for s in [
       TNT(mt_client),

@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v0.2.2 (2025/07/29)
+- fix:
+	- Update urllib3 and requests dependencies to 2.5.0 and 2.32.4 versions respectively to address security vulnerabilities.
+
 ## v0.2.1 (2025/05/20)
 - fix:
 	- Update setuptools dev dependecy to 80.8.0 version for fixing vulnerability issue.
