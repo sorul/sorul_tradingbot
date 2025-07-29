@@ -24,9 +24,10 @@ tag:
 	@git checkout master
 	@git merge --no-edit --log develop
 	@git tag v$$(poetry version -s)
-	@git push
+	@git push --tags
 	@git checkout develop
 	@poetry version
+	@echo "Tagging complete. Make a pull request to merge developer into master -> https://github.com/sorul/sorul_tradingbot/compare/developer?expand=1"
 
 start_docker:
 	docker compose up -d
