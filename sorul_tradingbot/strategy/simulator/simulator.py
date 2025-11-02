@@ -10,6 +10,7 @@ from typing import Iterable, List, Optional, Tuple, Type
 
 import pandas as pd
 from tqdm import tqdm
+import yfinance as yf
 from tradeo.ohlc import OHLC
 from tradeo.order import Order
 from tradeo.strategies.strategy import Strategy
@@ -230,10 +231,29 @@ class StrategySimulator:
     return self.mt_client.closed_trades
 
 
-def _load_data(csv_path: Path) -> pd.DataFrame:
+def _load_data(
+    csv_path: Path,
+    start_date: Optional[pd.Timestamp] = None,
+) -> pd.DataFrame:
   df = pd.read_csv(csv_path, parse_dates=['datetime'])
   df = df.set_index('datetime').sort_index()
-  return df[['open', 'high', 'low', 'close', 'volume']]
+  df = df[['open', 'high', 'low', 'close', 'volume']]
+  if start_date is not None:
+    start_ts = pd.Timestamp(start_date)
+    index_tz = df.index.tz
+    if index_tz is not None:
+      if start_ts.tz is None:
+        start_ts = start_ts.tz_localize(index_tz)
+      else:
+        start_ts = start_ts.tz_convert(index_tz)
+    elif start_ts.tz is not None:
+      start_ts = start_ts.tz_localize(None)
+    df = df[df.index >= start_ts]
+    if df.empty:
+      raise ValueError(
+          f'No candles available on or after the requested start date {start_ts.date()}.'
+      )
+  return df
 
 
 def _load_strategy(
@@ -246,7 +266,10 @@ def _load_strategy(
   return strategy_cls(mt_client)
 
 
-def _summarize(trades: Iterable[ExecutedOrder]) -> None:
+def _summarize(
+    trades: Iterable[ExecutedOrder],
+    symbol: str,
+) -> None:
   trades = list(trades)
   if not trades:
     print('No trades executed.')
@@ -254,8 +277,14 @@ def _summarize(trades: Iterable[ExecutedOrder]) -> None:
   wins = sum(1 for trade in trades if trade.result == 'take_profit')
   losses = sum(1 for trade in trades if trade.result == 'stop_loss')
   net = sum(trade.pnl for trade in trades)
+  if symbol.upper() == 'SP500':
+    try:
+      net = _convert_sp500_net_to_eur(trades)
+    except Exception as exc:  # pragma: no cover - defensive
+      LOGGER.warning('Could not convert SP500 net to EUR: %s', exc)
   print(
-      f'Trades: {len(trades)} | Wins: {wins} | Losses: {losses} | Net: {net:.2f}'
+      f'Trades: {len(trades)} | Wins: {wins} | Losses: {losses} | '
+      f'Net: {net:.2f} EUR'
   )
   # for trade in trades:
   #   side = 'BUY' if trade.order.order_type.buy else 'SELL'
@@ -263,6 +292,42 @@ def _summarize(trades: Iterable[ExecutedOrder]) -> None:
   #       f'{trade.entry_time.isoformat()} {side} -> {trade.exit_time.isoformat()} '
   #       f'{trade.result.upper()} pnl={trade.pnl:.2f}',
   #   )
+
+
+def _convert_sp500_net_to_eur(trades: Iterable[ExecutedOrder]) -> float:
+  """Convert SP500 PnL (assumed USD) into EUR using yearly EUR/USD averages."""
+  yearly_rates: dict[int, float] = {}
+  total_eur = 0.0
+  for trade in trades:
+    exit_time = trade.exit_time
+    year = exit_time.year
+    rate = yearly_rates.get(year)
+    if rate is None:
+      rate = _fetch_average_eurusd_rate(year)
+      yearly_rates[year] = rate
+    total_eur += trade.pnl / rate
+  return total_eur
+
+
+def _fetch_average_eurusd_rate(year: int) -> float:
+  """Fetch the average EUR/USD close price for a given year."""
+  start = datetime(year, 1, 1)
+  end = datetime(year + 1, 1, 1)
+  data = yf.download(
+      'EURUSD=X',
+      start=start,
+      end=end,
+      progress=False,
+      auto_adjust=False,
+  )
+  closes = data.get('Close')
+  if closes is None:
+    raise ValueError('No Close column found in EURUSD data.')
+  closes = closes.dropna()
+  if closes.empty:
+    raise ValueError(f'No EUR/USD data available for year {year}.')
+  mean_value = closes.mean()
+  return float(mean_value.iloc[0]) if hasattr(mean_value, 'iloc') else float(mean_value)
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -300,6 +365,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
           'Optional path to persist candles and trades as a pickle payload '
           'for notebook exploration.'
       ),
+  )
+  parser.add_argument(
+      '--start-date',
+      help='Start date in YYYY-MM-DD format to begin the simulation.',
   )
   return parser.parse_args(argv)
 
@@ -370,10 +439,18 @@ def main(argv: Optional[List[str]] = None) -> None:
       level=logging.WARNING, format='[%(levelname)s] %(message)s'
   )
   args = parse_args(argv)
+  start_date = None
+  if args.start_date:
+    try:
+      start_date = datetime.strptime(args.start_date, '%Y-%m-%d')
+    except ValueError as exc:
+      raise ValueError(
+          'Invalid start date format. Use YYYY-MM-DD.'
+      ) from exc
   csv_path = Path(args.data_file)
   if not csv_path.exists():
     raise FileNotFoundError(f'Data file not found: {csv_path}')
-  data = _load_data(csv_path)
+  data = _load_data(csv_path, start_date)
   mt_client = SimulatedMTClient()
   strategy = _load_strategy(
       args.strategy_module, args.strategy_class, mt_client
@@ -386,7 +463,7 @@ def main(argv: Optional[List[str]] = None) -> None:
       show_progress=not args.no_progress,
   )
   trades = simulator.run()
-  _summarize(trades)
+  _summarize(trades, args.symbol)
   export_file = getattr(args, 'export_file', None)
   if export_file:
     _export_results(
