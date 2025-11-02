@@ -46,6 +46,28 @@ class ExecutedOrder:
     return self.exit_time
 
 
+class OHLCView:
+  """Lightweight view over OHLC data without copying full history."""
+
+  def __init__(self, source: OHLC, source_df: pd.DataFrame, end: int) -> None:
+    if end <= 0:
+      raise ValueError('end must be positive')
+    self.datetime = source.datetime[:end]
+    self.open = source.open[:end]
+    self.high = source.high[:end]
+    self.low = source.low[:end]
+    self.close = source.close[:end]
+    self.volume = source.volume[:end]
+    self._df = source_df
+    self._end = end
+
+  def __len__(self) -> int:
+    return len(self.open)
+
+  def to_dataframe(self) -> pd.DataFrame:
+    return self._df.iloc[:self._end]
+
+
 class SimulatedMTClient:
   """Very small subset of MT_Client for strategy checks."""
   def __init__(self) -> None:
@@ -207,6 +229,20 @@ class StrategySimulator:
     self.symbol = symbol
     self.mt_client = mt_client
     self._show_progress = show_progress
+    self._ohlc_source = OHLC(
+        data,
+        volume_column_name='volume',
+    )
+    preload = getattr(self.strategy, 'set_backtest_data', None)
+    if callable(preload):
+      try:
+        preload(
+            ohlc=self._ohlc_source,
+            data=self.data,
+            symbol=self.symbol,
+        )
+      except TypeError:
+        preload(self._ohlc_source)
 
   def run(self) -> List[ExecutedOrder]:
     """Execute the simulation and return closed orders."""
@@ -219,10 +255,7 @@ class StrategySimulator:
       now = timestamp.to_pydatetime()
       self.mt_client.set_now(now)
       self.mt_client.evaluate_positions(row, now)
-      ohlc = OHLC(
-          self.data.iloc[:idx],
-          volume_column_name='volume',
-      )
+      ohlc = OHLCView(self._ohlc_source, self.data, idx)
       possible_order = self.strategy.indicator(ohlc, self.symbol, now)
       if possible_order and self.strategy.check_order_viability(possible_order):
         self.mt_client.create_new_order(possible_order)
