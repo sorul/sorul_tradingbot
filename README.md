@@ -48,3 +48,8 @@ I edit de crontab (crontab -e):
 @reboot cd ~/git/sorul_tradingbot/ && make start_docker
 */5 * * * 0-5 cd ~/git/sorul_tradingbot/ && make run_forex
 ```
+
+## Using the simulator
+You can use the simulator to test your strategies without using real money.
+First, make sure you have the required data file. You can find a sample data file at `sorul_tradingbot/strategy/simulator/data/sp500_5m_test.csv`. If you want to use your own data, place it in the same directory.
+To run the simulator, use the debug configuration provided in `.vscode/launch.json` called "Simulator".

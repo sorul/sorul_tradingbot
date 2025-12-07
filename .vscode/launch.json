@@ -9,6 +9,49 @@
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "make run_forex"
+    },
+    {
+      "name": "Simulator",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "/home/pisorul/.cache/pypoetry/virtualenvs/sorul-tradingbot-hpqtalII-py3.11/bin/python",
+      "program": "${workspaceFolder}/sorul_tradingbot/strategy/simulator/simulator.py",
+      "args": [
+        "--data-file",
+        "${input:SimulatorDataFile}",
+        "--strategy-module",
+        "${input:SimulatorStrategyModule}",
+        "--start-date",
+        "${input:SimulatorDate}"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
     }
+  ],
+  "inputs": [
+    {
+      "id": "SimulatorDataFile",
+      "type": "promptString",
+      "description": "Ruta al CSV a usar en el simulador",
+      "default": "sorul_tradingbot/strategy/simulator/data/sp500_5m_test.csv"
+    },
+    {
+      "id": "SimulatorStrategyModule",
+      "type": "promptString",
+      "description": "Ruta del módulo de estrategia (p.ej. sorul_tradingbot.strategy.private.volume_12)",
+      "default": "sorul_tradingbot.strategy.private.volume_12"
+    },
+    {
+      "id": "SimulatorOutputFile",
+      "type": "promptString",
+      "description": "Optional path to persist candles and trades as a pickle payload for notebook exploration.",
+      "default": "sorul_tradingbot/strategy/simulator/outputs/simulation_payload.pkl"
+    },
+    {
+      "id": "SimulatorDate",
+      "type": "promptString",
+      "description": "Optional date (YYYY-MM-DD) to run the simulation up to (inclusive). Leave empty to use all data.",
+      "default": "2024-12-01"
+    },
   ]
 }

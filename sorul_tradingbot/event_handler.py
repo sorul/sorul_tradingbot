@@ -7,26 +7,26 @@ from tradeo.strategies.strategy import Strategy
 from datetime import datetime
 from typing import List
 
-from sorul_tradingbot.strategy.private.volume_07 import Volume as Volume07
-from sorul_tradingbot.strategy.private.volume_08 import Volume as Volume08
-from sorul_tradingbot.strategy.private.volume_09 import Volume as Volume09
+from sorul_tradingbot.strategy.private.volume_14 import Volume as Volume14
 
 
 class ForexEventHandler(EventHandler):
   """This class only provides 'on_historical_data' event holder."""
-
   def __init__(self):
     """Initialize the attributes."""
     super().__init__('ForexEventHandler')
 
-  def on_historical_data(self, mt_client: MT_Client, symbol: str,
-                         data: OHLC) -> None:
+  def on_historical_data(
+      self,
+      mt_client: MT_Client,
+      symbol: str,
+      data: OHLC,
+  ) -> None:
     """Handle the return of GET_HISTORICAL_DATA command."""
     now_date = datetime.now(Config.utc_timezone)
     strategies: List[Strategy] = [
-        Volume07(mt_client),
-        Volume08(mt_client),
-        Volume09(mt_client),
+        # Volume11(mt_client),
+        Volume14(mt_client),
     ]
     for strategy in strategies:
       possible_order = strategy.indicator(data, symbol, now_date)

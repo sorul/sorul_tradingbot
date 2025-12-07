@@ -14,12 +14,20 @@ def strategy_factory(
   from sorul_tradingbot.strategy.private.volume_07 import Volume as Volume07
   from sorul_tradingbot.strategy.private.volume_08 import Volume as Volume08
   from sorul_tradingbot.strategy.private.volume_09 import Volume as Volume09
+  from sorul_tradingbot.strategy.private.volume_10 import Volume as Volume10
+  from sorul_tradingbot.strategy.private.volume_11 import Volume as Volume11
+  from sorul_tradingbot.strategy.private.volume_12 import Volume as Volume12
+  from sorul_tradingbot.strategy.private.volume_14 import Volume as Volume14
 
   for s in [
       TNT(mt_client),
       Volume07(mt_client),
       Volume08(mt_client),
       Volume09(mt_client),
+      Volume10(mt_client),
+      Volume11(mt_client),
+      Volume12(mt_client),
+      Volume14(mt_client),
   ]:
     if s.strategy_name in strategy_name or strategy_name in s.strategy_name:
       return s

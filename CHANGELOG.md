@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## v0.3.0 (2025/12/07)
+- feat:
+	- Added simulator functionality to test trading strategies using historical data without risking real money.
+	- Included a sample data file for the simulator at `sorul_tradingbot/strategy/simulator/data/sp500_5m_test.csv`.
+	- Provided a debug configuration in `.vscode/launch.json` for easy execution of the simulator.
+- fix:
+	- Update urllib3 to 2.6.0 version to address security vulnerability.
+
 ## v0.2.2 (2025/07/29)
 - fix:
 	- Update urllib3 and requests dependencies to 2.5.0 and 2.32.4 versions respectively to address security vulnerabilities.
