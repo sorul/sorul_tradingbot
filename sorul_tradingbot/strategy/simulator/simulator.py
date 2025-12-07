@@ -2,6 +2,7 @@
 import argparse
 import importlib
 import logging
+import os
 import pickle
 from dataclasses import dataclass
 from datetime import datetime
@@ -46,48 +47,30 @@ class ExecutedOrder:
     return self.exit_time
 
 
-class OHLCView:
-  """Lightweight view over OHLC data without copying full history."""
-
-  def __init__(self, source: OHLC, source_df: pd.DataFrame, end: int) -> None:
-    if end <= 0:
-      raise ValueError('end must be positive')
-    self.datetime = source.datetime[:end]
-    self.open = source.open[:end]
-    self.high = source.high[:end]
-    self.low = source.low[:end]
-    self.close = source.close[:end]
-    self.volume = source.volume[:end]
-    self._df = source_df
-    self._end = end
-
-  def __len__(self) -> int:
-    return len(self.open)
-
-  def to_dataframe(self) -> pd.DataFrame:
-    return self._df.iloc[:self._end]
-
-
 class SimulatedMTClient:
   """Very small subset of MT_Client for strategy checks."""
   def __init__(self) -> None:
+    """Initialize the simulated MT client with order and market state."""
     self.open_orders: List[Order] = []
     self.historical_trades: List[ExecutedOrder] = []
     self.closed_trades: List[ExecutedOrder] = []
     self._active_orders: dict[int, ActiveOrder] = {}
+    self._market_prices: dict[str, Tuple[float, float]] = {}
     self._ticket_sequence = 1
     self._now: Optional[datetime] = None
     self.current_time: Optional[datetime] = None
 
   def set_now(self, now: datetime) -> None:
+    """Set the current simulation time."""
     self._now = now
     self.current_time = now
 
   def create_new_order(self, order: Order) -> None:
+    """Create and register a new order in the simulated MT client."""
     if self._now is None:
       raise RuntimeError('Current simulation time is not set.')
     entry_price = self._infer_entry_price(order)
-    order._mutable_details._prices.price = entry_price  # type: ignore[attr-defined]
+    order._mutable_details._prices.price = entry_price  # type: ignore
     order._immutable_details.open_time = self._now  # type: ignore[attr-defined]
     order._ticket = self._ticket_sequence  # type: ignore[attr-defined]
     self._ticket_sequence += 1
@@ -110,7 +93,7 @@ class SimulatedMTClient:
     """Check if any active order hits TP or SL within the provided bar."""
     to_close: List[Tuple[Order, float, str]] = []
     high, low = float(bar.high), float(bar.low)
-    for ticket, meta in list(self._active_orders.items()):
+    for _, meta in list(self._active_orders.items()):
       order = meta.order
       is_buy = order.order_type.buy
       tp_hit, sl_hit = self._check_hits(order, high, low, is_buy)
@@ -134,6 +117,14 @@ class SimulatedMTClient:
         to_close.append((order, exit_price, result))
     for order, exit_price, result in to_close:
       self._close_order(order, exit_price, now, result)
+
+  def set_market_snapshot(self, symbol: str, bid: float, ask: float) -> None:
+    """Persist the latest bid/ask quote for downstream strategy hooks."""
+    self._market_prices[symbol] = (bid, ask)
+
+  def get_bid_ask(self, symbol: str) -> Tuple[float, float]:
+    """Expose the last known bid/ask quote for a symbol."""
+    return self._market_prices.get(symbol, (0.0, 0.0))
 
   def _check_hits(
       self,
@@ -177,9 +168,9 @@ class SimulatedMTClient:
     active = self._active_orders.pop(order.ticket)
     self.open_orders = [o for o in self.open_orders if o.ticket != order.ticket]
     pnl = (
-        exit_price -
-        active.entry_price if order.order_type.buy else active.entry_price -
         exit_price
+        - active.entry_price if order.order_type.buy else active.entry_price
+        - exit_price
     )
     executed = ExecutedOrder(
         order=order,
@@ -198,6 +189,60 @@ class SimulatedMTClient:
         result,
         pnl,
     )
+
+  def place_break_even(self, order: Order, log_comment: str = '') -> None:
+    """Move the stop loss to the entry price to mimic a break-even."""
+    active = self._active_orders.get(order.ticket)
+    if not active:
+      return
+    break_even = active.entry_price
+    order._mutable_details._prices.stop_loss = break_even  # type: ignore
+    LOGGER.info(
+        'Break even placed ticket=%s price=%.5f reason=%s',
+        order.ticket,
+        break_even,
+        log_comment,
+    )
+
+  def send_close_order_command(self, ticket: int, lots: float = 0) -> None:
+    """Close a specific order using the latest available quote."""
+    del lots  # The simulator always closes the full position.
+    order = self._active_orders.get(ticket)
+    if not order:
+      return
+    self._manual_close_order(order.order)
+
+  def send_close_orders_by_magic_command(self, magic: str) -> None:
+    """Close or cancel all orders that share the provided magic number."""
+    for order in list(self.open_orders):
+      if order.magic != magic:
+        continue
+      if order.order_type.market:
+        self._manual_close_order(order)
+      else:
+        self._cancel_order(order)
+
+  def _manual_close_order(self, order: Order) -> None:
+    active = self._active_orders.get(order.ticket)
+    if not active or self._now is None:
+      return
+    price = self._resolve_close_price(order, active.entry_price)
+    self._close_order(order, price, self._now, 'manual_close')
+
+  def _cancel_order(self, order: Order) -> None:
+    """Remove a pending order without recording a trade outcome."""
+    if order.ticket in self._active_orders:
+      self._active_orders.pop(order.ticket)
+    self.open_orders = [o for o in self.open_orders if o.ticket != order.ticket]
+    LOGGER.info('Order cancelled ticket=%s', order.ticket)
+
+  def _resolve_close_price(self, order: Order, fallback: float) -> float:
+    bid, ask = self.get_bid_ask(order.symbol)
+    if order.order_type.buy:
+      price = bid or ask
+    else:
+      price = ask or bid
+    return price or fallback
 
   @staticmethod
   def _infer_entry_price(order: Order) -> float:
@@ -223,26 +268,17 @@ class StrategySimulator:
       symbol: str,
       mt_client: SimulatedMTClient,
       show_progress: bool = True,
+      lookback_days: int = 5,
   ) -> None:
+    """Initialize the StrategySimulator."""
     self.strategy = strategy
     self.data = data
     self.symbol = symbol
     self.mt_client = mt_client
     self._show_progress = show_progress
-    self._ohlc_source = OHLC(
-        data,
-        volume_column_name='volume',
-    )
-    preload = getattr(self.strategy, 'set_backtest_data', None)
-    if callable(preload):
-      try:
-        preload(
-            ohlc=self._ohlc_source,
-            data=self.data,
-            symbol=self.symbol,
-        )
-      except TypeError:
-        preload(self._ohlc_source)
+    if lookback_days <= 0:
+      raise ValueError('lookback_days must be a positive integer.')
+    self._lookback_days = lookback_days
 
   def run(self) -> List[ExecutedOrder]:
     """Execute the simulation and return closed orders."""
@@ -252,10 +288,27 @@ class StrategySimulator:
           iterator, total=len(self.data), desc='Simulating', unit='bar'
       )
     for idx, (timestamp, row) in enumerate(iterator, start=1):
-      now = timestamp.to_pydatetime()
+      now = timestamp.to_pydatetime()  # type: ignore
       self.mt_client.set_now(now)
+      close_price = float(row.close)
+      self.mt_client.set_market_snapshot(self.symbol, close_price, close_price)
       self.mt_client.evaluate_positions(row, now)
-      ohlc = OHLCView(self._ohlc_source, self.data, idx)
+      # Manage any still-open orders before generating new ones.
+      for order in list(self.mt_client.open_orders):
+        if order.order_type.pending:
+          self.strategy.handle_pending_orders(order)
+        elif order.order_type.market:
+          self.strategy.handle_filled_orders(order)
+      end_ts = pd.Timestamp(timestamp)  # type: ignore
+      start_ts = end_ts - pd.Timedelta(days=self._lookback_days)
+      # Limit to a fixed trailing window to keep compute bounded.
+      window = self.data.loc[start_ts:end_ts]
+      if window.empty:
+        window = self.data.iloc[:idx]
+      ohlc = OHLC(
+          window,
+          volume_column_name='volume',
+      )
       possible_order = self.strategy.indicator(ohlc, self.symbol, now)
       if possible_order and self.strategy.check_order_viability(possible_order):
         self.mt_client.create_new_order(possible_order)
@@ -264,29 +317,44 @@ class StrategySimulator:
     return self.mt_client.closed_trades
 
 
-def _load_data(
-    csv_path: Path,
-    start_date: Optional[pd.Timestamp] = None,
-) -> pd.DataFrame:
-  df = pd.read_csv(csv_path, parse_dates=['datetime'])
-  df = df.set_index('datetime').sort_index()
-  df = df[['open', 'high', 'low', 'close', 'volume']]
-  if start_date is not None:
-    start_ts = pd.Timestamp(start_date)
-    index_tz = df.index.tz
-    if index_tz is not None:
-      if start_ts.tz is None:
-        start_ts = start_ts.tz_localize(index_tz)
-      else:
-        start_ts = start_ts.tz_convert(index_tz)
-    elif start_ts.tz is not None:
-      start_ts = start_ts.tz_localize(None)
-    df = df[df.index >= start_ts]
-    if df.empty:
-      raise ValueError(
-          f'No candles available on or after the requested start date {start_ts.date()}.'
-      )
-  return df
+def main(argv: Optional[List[str]] = None) -> None:
+  """Execute the strategy simulator with parsed command-line arguments."""
+  logging.basicConfig(
+      level=logging.WARNING, format='[%(levelname)s] %(message)s'
+  )
+  args = parse_args(argv)
+  start_date = None
+  if args.start_date:
+    try:
+      start_date = datetime.strptime(args.start_date, '%Y-%m-%d')
+    except ValueError as exc:
+      raise ValueError('Invalid start date format. Use YYYY-MM-DD.') from exc
+  csv_path = Path(args.data_file)
+  if not csv_path.exists():
+    raise FileNotFoundError(f'Data file not found: {csv_path}')
+  data = _load_data(csv_path, start_date)  # type: ignore
+  mt_client = SimulatedMTClient()
+  strategy = _load_strategy(
+      args.strategy_module, args.strategy_class, mt_client
+  )
+  simulator = StrategySimulator(
+      strategy,
+      data,
+      args.symbol,
+      mt_client,
+      show_progress=not args.no_progress,
+      lookback_days=args.lookback_days,
+  )
+  trades = simulator.run()
+  _summarize(trades, args.symbol)
+  export_file = getattr(args, 'export_file', None)
+  if export_file:
+    _export_results(
+        Path(export_file),
+        data,
+        trades,
+        mt_client.get_active_orders(),
+    )
 
 
 def _load_strategy(
@@ -296,7 +364,7 @@ def _load_strategy(
 ) -> Strategy:
   module = importlib.import_module(module_path)
   strategy_cls: Type[Strategy] = getattr(module, class_name)
-  return strategy_cls(mt_client)
+  return strategy_cls(mt_client)  # type: ignore
 
 
 def _summarize(
@@ -305,7 +373,7 @@ def _summarize(
 ) -> None:
   trades = list(trades)
   if not trades:
-    print('No trades executed.')
+    LOGGER.warning('No trades executed.')
     return
   wins = sum(1 for trade in trades if trade.result == 'take_profit')
   losses = sum(1 for trade in trades if trade.result == 'stop_loss')
@@ -313,18 +381,12 @@ def _summarize(
   if symbol.upper() == 'SP500':
     try:
       net = _convert_sp500_net_to_eur(trades)
-    except Exception as exc:  # pragma: no cover - defensive
+    except (ValueError, KeyError, TypeError) as exc:
       LOGGER.warning('Could not convert SP500 net to EUR: %s', exc)
-  print(
+  print(  # noqa: T201
       f'Trades: {len(trades)} | Wins: {wins} | Losses: {losses} | '
       f'Net: {net:.2f} EUR'
   )
-  # for trade in trades:
-  #   side = 'BUY' if trade.order.order_type.buy else 'SELL'
-  #   print(
-  #       f'{trade.entry_time.isoformat()} {side} -> {trade.exit_time.isoformat()} '
-  #       f'{trade.result.upper()} pnl={trade.pnl:.2f}',
-  #   )
 
 
 def _convert_sp500_net_to_eur(trades: Iterable[ExecutedOrder]) -> float:
@@ -338,7 +400,7 @@ def _convert_sp500_net_to_eur(trades: Iterable[ExecutedOrder]) -> float:
     if rate is None:
       rate = _fetch_average_eurusd_rate(year)
       yearly_rates[year] = rate
-    total_eur += trade.pnl / rate
+    total_eur += float(trade.pnl / rate)
   return total_eur
 
 
@@ -353,17 +415,53 @@ def _fetch_average_eurusd_rate(year: int) -> float:
       progress=False,
       auto_adjust=False,
   )
-  closes = data.get('Close')
+  closes = data.get('Close')  # type: ignore
   if closes is None:
     raise ValueError('No Close column found in EURUSD data.')
   closes = closes.dropna()
   if closes.empty:
     raise ValueError(f'No EUR/USD data available for year {year}.')
-  mean_value = closes.mean()
-  return float(mean_value.iloc[0]) if hasattr(mean_value, 'iloc') else float(mean_value)
+  return closes.mean()
+
+
+def _load_data(
+    csv_path: Path,
+    start_date: Optional[pd.Timestamp] = None,
+) -> pd.DataFrame:
+  df = pd.read_csv(csv_path, parse_dates=['datetime'])
+  df = df.set_index('datetime').sort_index()
+  df = df[['open', 'high', 'low', 'close', 'volume']]
+  if start_date is not None:
+    start_ts = pd.Timestamp(start_date)
+    index_tz = df.index.tz  # type: ignore
+    if index_tz is not None:
+      if start_ts.tz is None:
+        start_ts = start_ts.tz_localize(index_tz)
+      else:
+        start_ts = start_ts.tz_convert(index_tz)
+    elif start_ts.tz is not None:
+      start_ts = start_ts.tz_localize(None)
+    df = df[df.index >= start_ts]
+    if df.empty:
+      raise ValueError(
+          f'No candles after the requested start date {start_ts.date()}.'
+      )
+  return df
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+  """Parse command-line arguments for the OHLC strategy simulator."""
+  default_lookback = os.getenv('TB_LOOKBACK_DAYS')
+  try:
+    lookback_default_value = int(default_lookback) if default_lookback else 5
+  except ValueError as exc:
+    raise ValueError('TB_LOOKBACK_DAYS must be an integer if defined.') from exc
+  parser = _build_arg_parser(lookback_default_value)
+  return parser.parse_args(argv)
+
+
+def _build_arg_parser(lookback_default_value: int) -> argparse.ArgumentParser:
+  """Build the argument parser for the simulator."""
   parser = argparse.ArgumentParser(description='Simple OHLC strategy simulator')
   parser.add_argument(
       '--strategy-module',
@@ -387,12 +485,21 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
   )
   parser.add_argument(
       '--no-progress',
-    action='store_true',
+      action='store_true',
       help='Disable progress bar output.',
   )
   parser.add_argument(
+      '--lookback-days',
+      type=int,
+      default=lookback_default_value,
+      help=(
+          'Number of trailing days to provide to the strategy on each step '
+          'during the simulation (defaults to TB_LOOKBACK_DAYS or 5).'
+      ),
+  )
+  parser.add_argument(
       '--export-file',
-      default=
+      default=  # noqa: E251
       'sorul_tradingbot/strategy/simulator/outputs/simulation_payload.pkl',
       help=(
           'Optional path to persist candles and trades as a pickle payload '
@@ -403,47 +510,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
       '--start-date',
       help='Start date in YYYY-MM-DD format to begin the simulation.',
   )
-  return parser.parse_args(argv)
-
-
-def _orders_to_dataframe(
-    trades: Iterable[ExecutedOrder],
-    active_orders: Iterable[ActiveOrder],
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-  """Convert executed and active orders to DataFrames ready for export."""
-  executed_rows = []
-  for trade in trades:
-    order = trade.order
-    side = 'BUY' if order.order_type.buy else 'SELL'
-    executed_rows.append({
-        'ticket': order.ticket,
-        'symbol': order.symbol,
-        'side': side,
-        'entry_time': trade.entry_time,
-        'exit_time': trade.exit_time,
-        'entry_price': trade.entry_price,
-        'exit_price': trade.exit_price,
-        'take_profit': order.take_profit,
-        'stop_loss': order.stop_loss,
-        'result': trade.result,
-        'pnl': trade.pnl,
-    })
-  executed_df = pd.DataFrame(executed_rows)
-  active_rows = []
-  for active in active_orders:
-    order = active.order
-    side = 'BUY' if order.order_type.buy else 'SELL'
-    active_rows.append({
-        'ticket': order.ticket,
-        'symbol': order.symbol,
-        'side': side,
-        'entry_time': active.entry_time,
-        'entry_price': active.entry_price,
-        'take_profit': order.take_profit,
-        'stop_loss': order.stop_loss,
-    })
-  active_df = pd.DataFrame(active_rows)
-  return executed_df, active_df
+  return parser
 
 
 def _export_results(
@@ -464,47 +531,51 @@ def _export_results(
   }
   with export_path.open('wb') as file_handle:
     pickle.dump(payload, file_handle)
-  print(f'Exported simulation payload to {export_path}')
+  LOGGER.info(f'Exported simulation payload to {export_path}')
 
 
-def main(argv: Optional[List[str]] = None) -> None:
-  logging.basicConfig(
-      level=logging.WARNING, format='[%(levelname)s] %(message)s'
-  )
-  args = parse_args(argv)
-  start_date = None
-  if args.start_date:
-    try:
-      start_date = datetime.strptime(args.start_date, '%Y-%m-%d')
-    except ValueError as exc:
-      raise ValueError(
-          'Invalid start date format. Use YYYY-MM-DD.'
-      ) from exc
-  csv_path = Path(args.data_file)
-  if not csv_path.exists():
-    raise FileNotFoundError(f'Data file not found: {csv_path}')
-  data = _load_data(csv_path, start_date)
-  mt_client = SimulatedMTClient()
-  strategy = _load_strategy(
-      args.strategy_module, args.strategy_class, mt_client
-  )
-  simulator = StrategySimulator(
-      strategy,
-      data,
-      args.symbol,
-      mt_client,
-      show_progress=not args.no_progress,
-  )
-  trades = simulator.run()
-  _summarize(trades, args.symbol)
-  export_file = getattr(args, 'export_file', None)
-  if export_file:
-    _export_results(
-        Path(export_file),
-        data,
-        trades,
-        mt_client.get_active_orders(),
+def _orders_to_dataframe(
+    trades: Iterable[ExecutedOrder],
+    active_orders: Iterable[ActiveOrder],
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+  """Convert executed and active orders to DataFrames ready for export."""
+  executed_rows = []
+  for trade in trades:
+    order = trade.order
+    side = 'BUY' if order.order_type.buy else 'SELL'
+    executed_rows.append(
+        {
+            'ticket': order.ticket,
+            'symbol': order.symbol,
+            'side': side,
+            'entry_time': trade.entry_time,
+            'exit_time': trade.exit_time,
+            'entry_price': trade.entry_price,
+            'exit_price': trade.exit_price,
+            'take_profit': order.take_profit,
+            'stop_loss': order.stop_loss,
+            'result': trade.result,
+            'pnl': trade.pnl,
+        }
     )
+  executed_df = pd.DataFrame(executed_rows)
+  active_rows = []
+  for active in active_orders:
+    order = active.order
+    side = 'BUY' if order.order_type.buy else 'SELL'
+    active_rows.append(
+        {
+            'ticket': order.ticket,
+            'symbol': order.symbol,
+            'side': side,
+            'entry_time': active.entry_time,
+            'entry_price': active.entry_price,
+            'take_profit': order.take_profit,
+            'stop_loss': order.stop_loss,
+        }
+    )
+  active_df = pd.DataFrame(active_rows)
+  return executed_df, active_df
 
 
 if __name__ == '__main__':

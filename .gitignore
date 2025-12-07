@@ -162,6 +162,9 @@ cython_debug/
 **/strategy/private/*
 !**/strategy/private/__init__.py
 memo.md
+*.pkl
+sorul_tradingbot/strategy/simulator/data/*
+!sorul_tradingbot/strategy/simulator/data/sp500_5m_test.csv
 
 metatrader/*
 !metatrader/root/
