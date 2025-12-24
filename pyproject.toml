@@ -38,6 +38,10 @@ mplfinance = "^0.12.10b0"
 plotly = "^6.3.1"
 nbformat = "^5.10.4"
 yfinance = "^0.2.66"
+notebook = "^7.5.1"
+pandoc = "^2.4"
+ipywidgets = "^8.1.8"
+anywidget = "^0.9.21"
 
 [tool.poetry.scripts]
 run_forex = "sorul_tradingbot.main_forex:run"

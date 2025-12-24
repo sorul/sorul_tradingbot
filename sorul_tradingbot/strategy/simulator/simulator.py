@@ -4,6 +4,7 @@ import importlib
 import logging
 import os
 import pickle
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,7 @@ import yfinance as yf
 from tradeo.ohlc import OHLC
 from tradeo.order import Order
 from tradeo.strategies.strategy import Strategy
+from tradeo.trading_methods import calculate_heikin_ashi, calculate_poc_vah_val
 
 logging.getLogger('tradeo').setLevel(logging.WARNING)
 logging.getLogger().setLevel(logging.WARNING)  # si usan el root
@@ -279,6 +281,44 @@ class StrategySimulator:
     if lookback_days <= 0:
       raise ValueError('lookback_days must be a positive integer.')
     self._lookback_days = lookback_days
+    self._levels: List[dict] = []
+    self._supports_levels = all(
+        hasattr(strategy, attr)
+        for attr in ('_get_session_times', '_get_previous_available_date')
+    )
+
+  def get_levels(self) -> List[dict]:
+    """Return the per-bar levels captured during the simulation."""
+    return list(self._levels)
+
+  def _capture_levels(self, ohlc: OHLC, now: datetime) -> None:
+    """Capture previous-session levels matching the strategy logic."""
+    if not self._supports_levels:
+      return
+    heikin = calculate_heikin_ashi(ohlc)
+    start_t, end_t = self.strategy._get_session_times(  # type: ignore[attr-defined]
+        now
+    )
+    daily_levels = calculate_poc_vah_val(
+        heikin,
+        session_start=start_t.strftime('%H:%M'),
+        session_end=end_t.strftime('%H:%M'),
+    )
+    prev_date = self.strategy._get_previous_available_date(  # type: ignore[attr-defined]
+        now,
+        daily_levels,
+    )
+    if prev_date and prev_date in daily_levels:
+      levels = daily_levels[prev_date]
+      self._levels.append(
+          {
+              'timestamp': now,
+              'levels_date': pd.Timestamp(prev_date),
+              'POC': levels['POC'],
+              'VAH': levels['VAH'],
+              'VAL': levels['VAL'],
+          }
+      )
 
   def run(self) -> List[ExecutedOrder]:
     """Execute the simulation and return closed orders."""
@@ -309,8 +349,11 @@ class StrategySimulator:
           window,
           volume_column_name='volume',
       )
+      self._capture_levels(ohlc, now)
       possible_order = self.strategy.indicator(ohlc, self.symbol, now)
       if possible_order and self.strategy.check_order_viability(possible_order):
+        if possible_order.order_type.market and not possible_order.price:
+          possible_order._mutable_details._prices.price = close_price  # type: ignore
         self.mt_client.create_new_order(possible_order)
     if self._show_progress:
       tqdm.write('Simulation completed')
@@ -346,15 +389,24 @@ def main(argv: Optional[List[str]] = None) -> None:
       lookback_days=args.lookback_days,
   )
   trades = simulator.run()
-  _summarize(trades, args.symbol)
+  summary_text = _summarize(trades, args.symbol)
   export_file = getattr(args, 'export_file', None)
   if export_file:
+    run_date = datetime.now()
+    export_path, snapshot_path = _resolve_export_paths(
+        Path(export_file), args.strategy_module, run_date
+    )
     _export_results(
-        Path(export_file),
+        export_path,
         data,
         trades,
         mt_client.get_active_orders(),
+        simulator.get_levels(),
     )
+    _snapshot_strategy(args.strategy_module, snapshot_path)
+    summary_path = export_path.parent / 'simulation_summary.txt'
+    summary_payload = summary_text or 'No trades executed.'
+    summary_path.write_text(f'{summary_payload}\n', encoding='utf-8')
 
 
 def _load_strategy(
@@ -370,11 +422,11 @@ def _load_strategy(
 def _summarize(
     trades: Iterable[ExecutedOrder],
     symbol: str,
-) -> None:
+) -> Optional[str]:
   trades = list(trades)
   if not trades:
     LOGGER.warning('No trades executed.')
-    return
+    return None
   wins = sum(1 for trade in trades if trade.result == 'take_profit')
   losses = sum(1 for trade in trades if trade.result == 'stop_loss')
   net = sum(trade.pnl for trade in trades)
@@ -383,10 +435,13 @@ def _summarize(
       net = _convert_sp500_net_to_eur(trades)
     except (ValueError, KeyError, TypeError) as exc:
       LOGGER.warning('Could not convert SP500 net to EUR: %s', exc)
-  print(  # noqa: T201
+  summary = (
       f'Trades: {len(trades)} | Wins: {wins} | Losses: {losses} | '
+      f'Ratio: {wins / (wins + losses) if wins + losses else 0:.2f} | '
       f'Net: {net:.2f} EUR'
   )
+  print(summary)  # noqa: T201
+  return summary
 
 
 def _convert_sp500_net_to_eur(trades: Iterable[ExecutedOrder]) -> float:
@@ -421,7 +476,12 @@ def _fetch_average_eurusd_rate(year: int) -> float:
   closes = closes.dropna()
   if closes.empty:
     raise ValueError(f'No EUR/USD data available for year {year}.')
-  return closes.mean()
+  mean_value = closes.mean()
+  if isinstance(mean_value, pd.Series):
+    if mean_value.empty:
+      raise ValueError(f'No EUR/USD data available for year {year}.')
+    mean_value = mean_value.iloc[0]
+  return float(mean_value)
 
 
 def _load_data(
@@ -475,7 +535,7 @@ def _build_arg_parser(lookback_default_value: int) -> argparse.ArgumentParser:
   )
   parser.add_argument(
       '--data-file',
-      default='sorul_tradingbot/strategy/simulator/data/sp500_5m_test.csv',
+      default='sorul_tradingbot/strategy/simulator/data/sp500_test.csv',
       help='CSV file with bars data.',
   )
   parser.add_argument(
@@ -502,8 +562,9 @@ def _build_arg_parser(lookback_default_value: int) -> argparse.ArgumentParser:
       default=  # noqa: E251
       'sorul_tradingbot/strategy/simulator/outputs/simulation_payload.pkl',
       help=(
-          'Optional path to persist candles and trades as a pickle payload '
-          'for notebook exploration.'
+          'Base path or directory to persist candles and trades as a pickle '
+          'payload for notebook exploration. A strategy/date subfolder is '
+          'created automatically.'
       ),
   )
   parser.add_argument(
@@ -518,20 +579,78 @@ def _export_results(
     candles: pd.DataFrame,
     trades: Iterable[ExecutedOrder],
     active_orders: Iterable[ActiveOrder],
+    levels: Optional[Iterable[dict]] = None,
 ) -> None:
   """Persist simulation payload for later inspection in notebooks."""
   export_path = export_path.expanduser()
   export_path.parent.mkdir(parents=True, exist_ok=True)
   candles_df = candles.reset_index().rename(columns={'index': 'datetime'})
   executed_df, active_df = _orders_to_dataframe(trades, active_orders)
+  levels_df = (
+      pd.DataFrame(levels)
+      if levels is not None
+      else pd.DataFrame(columns=['timestamp', 'levels_date', 'POC', 'VAH', 'VAL'])
+  )
   payload = {
       'candles': candles_df,
       'closed_trades': executed_df,
       'open_trades': active_df,
+      'levels': levels_df,
   }
   with export_path.open('wb') as file_handle:
     pickle.dump(payload, file_handle)
   LOGGER.info(f'Exported simulation payload to {export_path}')
+
+
+def _safe_strategy_name(strategy_module: str) -> str:
+  base_name = strategy_module.rsplit('.', 1)[-1]
+  safe_name = ''.join(
+      ch if (ch.isalnum() or ch in ('-', '_')) else '_' for ch in base_name
+  )
+  return safe_name or 'strategy'
+
+
+def _resolve_export_paths(
+    export_path: Path,
+    strategy_module: str,
+    run_date: datetime,
+) -> Tuple[Path, Path]:
+  """Build output paths for the payload and strategy snapshot."""
+  export_path = export_path.expanduser()
+  strategy_name = _safe_strategy_name(strategy_module)
+  if export_path.suffix:
+    base_dir = export_path.parent
+    base_name = export_path.stem
+  else:
+    base_dir = export_path
+    base_name = 'simulation_payload'
+  if base_name.endswith(f'_{strategy_name}'):
+    payload_name = f'{base_name}.pkl'
+  else:
+    payload_name = f'{base_name}_{strategy_name}.pkl'
+  timestamp = run_date.strftime('%Y-%m-%d_%H-%M')
+  run_dir = base_dir / f'{strategy_name}_{timestamp}'
+  return run_dir / payload_name, run_dir / f'{strategy_name}.py'
+
+
+def _snapshot_strategy(
+    strategy_module: str,
+    destination: Path,
+) -> None:
+  """Copy the strategy source file into the output directory."""
+  module = importlib.import_module(strategy_module)
+  module_path = getattr(module, '__file__', None)
+  if not module_path:
+    LOGGER.warning('Strategy module has no file to snapshot.')
+    return
+  source_path = Path(module_path)
+  if source_path.suffix == '.pyc':
+    source_path = source_path.with_suffix('.py')
+  if not source_path.exists():
+    LOGGER.warning(f'Strategy file not found for snapshot: {source_path}')
+    return
+  destination.parent.mkdir(parents=True, exist_ok=True)
+  shutil.copy2(source_path, destination)
 
 
 def _orders_to_dataframe(
@@ -548,6 +667,7 @@ def _orders_to_dataframe(
             'ticket': order.ticket,
             'symbol': order.symbol,
             'side': side,
+            'comment': order.comment,
             'entry_time': trade.entry_time,
             'exit_time': trade.exit_time,
             'entry_price': trade.entry_price,
@@ -568,6 +688,7 @@ def _orders_to_dataframe(
             'ticket': order.ticket,
             'symbol': order.symbol,
             'side': side,
+            'comment': order.comment,
             'entry_time': active.entry_time,
             'entry_price': active.entry_price,
             'take_profit': order.take_profit,
