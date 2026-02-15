@@ -367,15 +367,23 @@ def main(argv: Optional[List[str]] = None) -> None:
   )
   args = parse_args(argv)
   start_date = None
+  finish_date = None
   if args.start_date:
     try:
       start_date = datetime.strptime(args.start_date, '%Y-%m-%d')
     except ValueError as exc:
       raise ValueError('Invalid start date format. Use YYYY-MM-DD.') from exc
+  if args.finish_date:
+    try:
+      finish_date = datetime.strptime(args.finish_date, '%Y-%m-%d')
+    except ValueError as exc:
+      raise ValueError('Invalid finish date format. Use YYYY-MM-DD.') from exc
+  if start_date and finish_date and start_date > finish_date:
+    raise ValueError('Start date must be earlier than finish date.')
   csv_path = Path(args.data_file)
   if not csv_path.exists():
     raise FileNotFoundError(f'Data file not found: {csv_path}')
-  data = _load_data(csv_path, start_date)  # type: ignore
+  data = _load_data(csv_path, start_date, finish_date)  # type: ignore
   mt_client = SimulatedMTClient()
   strategy = _load_strategy(
       args.strategy_module, args.strategy_class, mt_client
@@ -389,7 +397,7 @@ def main(argv: Optional[List[str]] = None) -> None:
       lookback_days=args.lookback_days,
   )
   trades = simulator.run()
-  summary_text = _summarize(trades, args.symbol)
+  summary_text = _summarize(trades, args.symbol, csv_path)
   export_file = getattr(args, 'export_file', None)
   if export_file:
     run_date = datetime.now()
@@ -422,11 +430,15 @@ def _load_strategy(
 def _summarize(
     trades: Iterable[ExecutedOrder],
     symbol: str,
-) -> Optional[str]:
+    data_file: Path,
+) -> str:
   trades = list(trades)
+  data_file_str = str(data_file)
   if not trades:
     LOGGER.warning('No trades executed.')
-    return None
+    summary = f'Input file: {data_file_str} | No trades executed.'
+    print(summary)  # noqa: T201
+    return summary
   wins = sum(1 for trade in trades if trade.result == 'take_profit')
   losses = sum(1 for trade in trades if trade.result == 'stop_loss')
   net = sum(trade.pnl for trade in trades)
@@ -436,7 +448,8 @@ def _summarize(
     except (ValueError, KeyError, TypeError) as exc:
       LOGGER.warning('Could not convert SP500 net to EUR: %s', exc)
   summary = (
-      f'Trades: {len(trades)} | Wins: {wins} | Losses: {losses} | '
+      f'Input file: {data_file_str} | Trades: {len(trades)} | '
+      f'Wins: {wins} | Losses: {losses} | '
       f'Ratio: {wins / (wins + losses) if wins + losses else 0:.2f} | '
       f'Net: {net:.2f} EUR'
   )
@@ -487,6 +500,7 @@ def _fetch_average_eurusd_rate(year: int) -> float:
 def _load_data(
     csv_path: Path,
     start_date: Optional[pd.Timestamp] = None,
+    finish_date: Optional[pd.Timestamp] = None,
 ) -> pd.DataFrame:
   df = pd.read_csv(csv_path, parse_dates=['datetime'])
   df = df.set_index('datetime').sort_index()
@@ -505,6 +519,21 @@ def _load_data(
     if df.empty:
       raise ValueError(
           f'No candles after the requested start date {start_ts.date()}.'
+      )
+  if finish_date is not None:
+    finish_ts = pd.Timestamp(finish_date)
+    index_tz = df.index.tz  # type: ignore
+    if index_tz is not None:
+      if finish_ts.tz is None:
+        finish_ts = finish_ts.tz_localize(index_tz)
+      else:
+        finish_ts = finish_ts.tz_convert(index_tz)
+    elif finish_ts.tz is not None:
+      finish_ts = finish_ts.tz_localize(None)
+    df = df[df.index <= finish_ts]
+    if df.empty:
+      raise ValueError(
+          f'No candles before the requested finish date {finish_ts.date()}.'
       )
   return df
 
@@ -570,6 +599,10 @@ def _build_arg_parser(lookback_default_value: int) -> argparse.ArgumentParser:
   parser.add_argument(
       '--start-date',
       help='Start date in YYYY-MM-DD format to begin the simulation.',
+  )
+  parser.add_argument(
+      '--finish-date',
+      help='Finish date in YYYY-MM-DD format to end the simulation.',
   )
   return parser
 

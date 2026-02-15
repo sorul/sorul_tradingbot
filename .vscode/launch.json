@@ -13,7 +13,9 @@
         "--strategy-module",
         "${input:SimulatorStrategyModule}",
         "--start-date",
-        "${input:SimulatorDate}"
+        "${input:SimulatorStartDate}",
+        "--finish-date",
+        "${input:SimulatorFinishDate}",
       ],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}"
@@ -42,10 +44,16 @@
       "default": "sorul_tradingbot.strategy.private.volume_12"
     },
     {
-      "id": "SimulatorDate",
+      "id": "SimulatorStartDate",
       "type": "promptString",
       "description": "Optional date (YYYY-MM-DD) to run the simulation up to (inclusive). Leave empty to use all data.",
       "default": "2024-12-01"
+    },
+    {
+      "id": "SimulatorFinishDate",
+      "type": "promptString",
+      "description": "Optional date (YYYY-MM-DD) to run the simulation up to (inclusive). Leave empty to use all data.",
+      "default": "2050-12-01"
     },
   ]
 }
