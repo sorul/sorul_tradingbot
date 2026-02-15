@@ -164,7 +164,7 @@ cython_debug/
 memo.md
 *.pkl
 sorul_tradingbot/strategy/simulator/data/*
-!sorul_tradingbot/strategy/simulator/data/sp500_5m_test.csv
+!sorul_tradingbot/strategy/simulator/data/sp500_test.csv
 
 metatrader/*
 !metatrader/root/
