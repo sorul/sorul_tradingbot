@@ -37,3 +37,15 @@ stop_docker:
 
 run_forex:
 	source .env && ~/.local/bin/poetry run run_forex
+
+simulator_50k:
+	nohup poetry run python sorul_tradingbot/strategy/simulator/simulator.py --data-file sorul_tradingbot/strategy/simulator/data/sp500_50k.csv --strategy-module sorul_tradingbot.strategy.private.volume_16 --start-date "" --finish-date "" > simulator.log 2>&1 &
+
+simulator_2024:
+	nohup poetry run python sorul_tradingbot/strategy/simulator/simulator.py --data-file sorul_tradingbot/strategy/simulator/data/sp500_2024.csv --strategy-module sorul_tradingbot.strategy.private.volume_16 --start-date "" --finish-date "" > simulator.log 2>&1 &
+
+simulator_2023:
+	nohup poetry run python sorul_tradingbot/strategy/simulator/simulator.py --data-file sorul_tradingbot/strategy/simulator/data/sp500_2023.csv --strategy-module sorul_tradingbot.strategy.private.volume_16 --start-date "" --finish-date "" > simulator.log 2>&1 &
+
+simulator_2022:
+	nohup poetry run python sorul_tradingbot/strategy/simulator/simulator.py --data-file sorul_tradingbot/strategy/simulator/data/sp500_2022.csv --strategy-module sorul_tradingbot.strategy.private.volume_16 --start-date "" --finish-date "" > simulator.log 2>&1 &
