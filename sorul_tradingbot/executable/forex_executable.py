@@ -144,8 +144,9 @@ class ForexExecutable(Executable):
     last_balance = get_last_balance()
     difference = balance - last_balance
     emoji = '🚀' if difference >= 0 else '☔'
-    message_condition = local_date.hour == 12 and local_date.minute == 5
-    if message_condition and balance != -1:
+    day_condition = local_date.weekday() == 0  # Monday
+    hour_condition = local_date.hour == 12 and local_date.minute == 5
+    if day_condition and hour_condition and balance != -1:
       log.info(f'{emoji} {difference:.2f} €')
       write_file(Files.LAST_BALANCE.value, str(balance))
       return True
