@@ -69,10 +69,8 @@ class ForexExecutable(Executable):
     self._send_profit_message(mt_client, local_date)
 
     # Send commands to obtain the historical data
-    [
-        mt_client.get_historical_data(s, Config.timeframe)
-        for s in Config.symbols
-    ]
+    for symbol in Config.symbols:
+      mt_client.get_historical_data(symbol, Config.timeframe)
 
     # Send commands to obtain bid/ask
     mt_client.subscribe_symbols(Config.symbols)
