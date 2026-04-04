@@ -169,3 +169,8 @@ sorul_tradingbot/strategy/simulator/data/*
 metatrader/*
 !metatrader/root/
 !metatrader/docker_mt5_start.sh
+
+sorul_tradingbot/strategy/simulator/data/*
+sorul_tradingbot/strategy/simulator/outputs/*
+!sorul_tradingbot/strategy/simulator/data/.gitkeep
+!sorul_tradingbot/strategy/simulator/outputs/.gitkeep
