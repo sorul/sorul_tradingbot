@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v0.3.2 (2026/04/04)
+- fix:
+	- Update urllib3, pillow, requests, protobuf and tornado libs to address security vulnerability.
+
 ## v0.3.1 (2026/01/29)
 - fix:
 	- Update urllib3 and protobuf lib to address security vulnerability.
