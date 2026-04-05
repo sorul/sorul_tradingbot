@@ -2,15 +2,6 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Makefile run_forex",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/.env",
-      "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}",
-      "preLaunchTask": "make run_forex"
-    },
-    {
       "name": "Simulator",
       "type": "debugpy",
       "request": "launch",
@@ -22,18 +13,29 @@
         "--strategy-module",
         "${input:SimulatorStrategyModule}",
         "--start-date",
-        "${input:SimulatorDate}"
+        "${input:SimulatorStartDate}",
+        "--finish-date",
+        "${input:SimulatorFinishDate}",
       ],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}"
-    }
+    },
+    {
+      "name": "Makefile run_forex",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/.env",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "make run_forex"
+    },
   ],
   "inputs": [
     {
       "id": "SimulatorDataFile",
       "type": "promptString",
       "description": "Ruta al CSV a usar en el simulador",
-      "default": "sorul_tradingbot/strategy/simulator/data/sp500_5m_test.csv"
+      "default": "sorul_tradingbot/strategy/simulator/data/sp500_test.csv"
     },
     {
       "id": "SimulatorStrategyModule",
@@ -42,16 +44,16 @@
       "default": "sorul_tradingbot.strategy.private.volume_12"
     },
     {
-      "id": "SimulatorOutputFile",
-      "type": "promptString",
-      "description": "Optional path to persist candles and trades as a pickle payload for notebook exploration.",
-      "default": "sorul_tradingbot/strategy/simulator/outputs/simulation_payload.pkl"
-    },
-    {
-      "id": "SimulatorDate",
+      "id": "SimulatorStartDate",
       "type": "promptString",
       "description": "Optional date (YYYY-MM-DD) to run the simulation up to (inclusive). Leave empty to use all data.",
       "default": "2024-12-01"
+    },
+    {
+      "id": "SimulatorFinishDate",
+      "type": "promptString",
+      "description": "Optional date (YYYY-MM-DD) to run the simulation up to (inclusive). Leave empty to use all data.",
+      "default": "2050-12-01"
     },
   ]
 }

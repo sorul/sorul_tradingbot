@@ -51,5 +51,5 @@ I edit de crontab (crontab -e):
 
 ## Using the simulator
 You can use the simulator to test your strategies without using real money.
-First, make sure you have the required data file. You can find a sample data file at `sorul_tradingbot/strategy/simulator/data/sp500_5m_test.csv`. If you want to use your own data, place it in the same directory.
+First, make sure you have the required data file. You can find a sample data file at `sorul_tradingbot/strategy/simulator/data/sp500_test.csv`. If you want to use your own data, place it in the same directory.
 To run the simulator, use the debug configuration provided in `.vscode/launch.json` called "Simulator".
