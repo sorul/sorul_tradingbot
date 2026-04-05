@@ -4,6 +4,7 @@ import importlib
 import logging
 import os
 import pickle
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,7 @@ import yfinance as yf
 from tradeo.ohlc import OHLC
 from tradeo.order import Order
 from tradeo.strategies.strategy import Strategy
+from tradeo.trading_methods import calculate_heikin_ashi, calculate_poc_vah_val
 
 logging.getLogger('tradeo').setLevel(logging.WARNING)
 logging.getLogger().setLevel(logging.WARNING)  # si usan el root
@@ -279,6 +281,45 @@ class StrategySimulator:
     if lookback_days <= 0:
       raise ValueError('lookback_days must be a positive integer.')
     self._lookback_days = lookback_days
+    self._levels: List[dict] = []
+    self._supports_levels = all(
+        hasattr(strategy, attr)
+        for attr in ('_get_session_times', '_get_previous_available_date')
+    )
+
+  def get_levels(self) -> List[dict]:
+    """Return the per-bar levels captured during the simulation."""
+    return list(self._levels)
+
+  def _capture_levels(self, ohlc: OHLC, now: datetime) -> None:
+    """Capture previous-session levels matching the strategy logic."""
+    if not self._supports_levels:
+      return
+    heikin = calculate_heikin_ashi(ohlc)
+    get_session_times = (
+        self.strategy._get_session_times  # type: ignore[attr-defined]
+    )
+    start_t, end_t = get_session_times(now)
+    daily_levels = calculate_poc_vah_val(
+        heikin,
+        session_start=start_t.strftime('%H:%M'),
+        session_end=end_t.strftime('%H:%M'),
+    )
+    get_previous_date = (
+        self.strategy._get_previous_available_date  # type: ignore[attr-defined]
+    )
+    prev_date = get_previous_date(now, daily_levels)
+    if prev_date and prev_date in daily_levels:
+      levels = daily_levels[prev_date]
+      self._levels.append(
+          {
+              'timestamp': now,
+              'levels_date': pd.Timestamp(prev_date),
+              'POC': levels['POC'],
+              'VAH': levels['VAH'],
+              'VAL': levels['VAL'],
+          }
+      )
 
   def run(self) -> List[ExecutedOrder]:
     """Execute the simulation and return closed orders."""
@@ -288,33 +329,60 @@ class StrategySimulator:
           iterator, total=len(self.data), desc='Simulating', unit='bar'
       )
     for idx, (timestamp, row) in enumerate(iterator, start=1):
-      now = timestamp.to_pydatetime()  # type: ignore
-      self.mt_client.set_now(now)
-      close_price = float(row.close)
-      self.mt_client.set_market_snapshot(self.symbol, close_price, close_price)
-      self.mt_client.evaluate_positions(row, now)
-      # Manage any still-open orders before generating new ones.
-      for order in list(self.mt_client.open_orders):
-        if order.order_type.pending:
-          self.strategy.handle_pending_orders(order)
-        elif order.order_type.market:
-          self.strategy.handle_filled_orders(order)
-      end_ts = pd.Timestamp(timestamp)  # type: ignore
-      start_ts = end_ts - pd.Timedelta(days=self._lookback_days)
-      # Limit to a fixed trailing window to keep compute bounded.
-      window = self.data.loc[start_ts:end_ts]
-      if window.empty:
-        window = self.data.iloc[:idx]
-      ohlc = OHLC(
-          window,
-          volume_column_name='volume',
-      )
-      possible_order = self.strategy.indicator(ohlc, self.symbol, now)
-      if possible_order and self.strategy.check_order_viability(possible_order):
-        self.mt_client.create_new_order(possible_order)
+      self._process_row(idx, timestamp, row)
     if self._show_progress:
       tqdm.write('Simulation completed')
     return self.mt_client.closed_trades
+
+  def _process_row(
+      self,
+      idx: int,
+      timestamp: pd.Timestamp,
+      row: pd.Series,
+  ) -> None:
+    now = timestamp.to_pydatetime()  # type: ignore[union-attr]
+    close_price = float(row.close)
+    self.mt_client.set_now(now)
+    self.mt_client.set_market_snapshot(self.symbol, close_price, close_price)
+    self.mt_client.evaluate_positions(row, now)
+    self._handle_open_orders()
+    window = self._build_window(idx, timestamp)
+    ohlc = OHLC(window, volume_column_name='volume')
+    self._capture_levels(ohlc, now)
+    self._maybe_create_order(ohlc, now, close_price)
+
+  def _handle_open_orders(self) -> None:
+    # Manage any still-open orders before generating new ones.
+    for order in list(self.mt_client.open_orders):
+      if order.order_type.pending:
+        self.strategy.handle_pending_orders(order)
+      elif order.order_type.market:
+        self.strategy.handle_filled_orders(order)
+
+  def _build_window(self, idx: int, timestamp: pd.Timestamp) -> pd.DataFrame:
+    end_ts = pd.Timestamp(timestamp)
+    start_ts = end_ts - pd.Timedelta(days=self._lookback_days)
+    # Limit to a fixed trailing window to keep compute bounded.
+    window = self.data.loc[start_ts:end_ts]
+    if window.empty:
+      return self.data.iloc[:idx]
+    return window
+
+  def _maybe_create_order(
+      self,
+      ohlc: OHLC,
+      now: datetime,
+      close_price: float,
+  ) -> None:
+    possible_order = self.strategy.indicator(ohlc, self.symbol, now)
+    if not possible_order:
+      return
+    if not self.strategy.check_order_viability(possible_order):
+      return
+    if possible_order.order_type.market and not possible_order.price:
+      price_details = possible_order._mutable_details._prices  # type: ignore[attr-defined]  # noqa: E501
+      price_details.price = close_price
+    self.mt_client.create_new_order(possible_order)
 
 
 def main(argv: Optional[List[str]] = None) -> None:
@@ -323,16 +391,14 @@ def main(argv: Optional[List[str]] = None) -> None:
       level=logging.WARNING, format='[%(levelname)s] %(message)s'
   )
   args = parse_args(argv)
-  start_date = None
-  if args.start_date:
-    try:
-      start_date = datetime.strptime(args.start_date, '%Y-%m-%d')
-    except ValueError as exc:
-      raise ValueError('Invalid start date format. Use YYYY-MM-DD.') from exc
+  start_date = _parse_optional_date(args.start_date, 'start')
+  finish_date = _parse_optional_date(args.finish_date, 'finish')
+  if start_date and finish_date and start_date > finish_date:
+    raise ValueError('Start date must be earlier than finish date.')
   csv_path = Path(args.data_file)
   if not csv_path.exists():
     raise FileNotFoundError(f'Data file not found: {csv_path}')
-  data = _load_data(csv_path, start_date)  # type: ignore
+  data = _load_data(csv_path, start_date, finish_date)  # type: ignore
   mt_client = SimulatedMTClient()
   strategy = _load_strategy(
       args.strategy_module, args.strategy_class, mt_client
@@ -346,15 +412,38 @@ def main(argv: Optional[List[str]] = None) -> None:
       lookback_days=args.lookback_days,
   )
   trades = simulator.run()
-  _summarize(trades, args.symbol)
+  summary_text = _summarize(trades, args.symbol, csv_path)
   export_file = getattr(args, 'export_file', None)
   if export_file:
+    run_date = datetime.now()
+    export_path, snapshot_path = _resolve_export_paths(
+        Path(export_file), args.strategy_module, run_date
+    )
     _export_results(
-        Path(export_file),
+        export_path,
         data,
         trades,
         mt_client.get_active_orders(),
+        simulator.get_levels(),
     )
+    _snapshot_strategy(args.strategy_module, snapshot_path)
+    summary_path = export_path.parent / 'simulation_summary.txt'
+    summary_payload = summary_text or 'No trades executed.'
+    summary_path.write_text(f'{summary_payload}\n', encoding='utf-8')
+
+
+def _parse_optional_date(
+    value: Optional[str],
+    label: str,
+) -> Optional[datetime]:
+  if not value:
+    return None
+  try:
+    return datetime.strptime(value, '%Y-%m-%d')
+  except ValueError as exc:
+    raise ValueError(
+        f'Invalid {label} date format. Use YYYY-MM-DD.'
+    ) from exc
 
 
 def _load_strategy(
@@ -370,11 +459,15 @@ def _load_strategy(
 def _summarize(
     trades: Iterable[ExecutedOrder],
     symbol: str,
-) -> None:
+    data_file: Path,
+) -> str:
   trades = list(trades)
+  data_file_str = str(data_file)
   if not trades:
     LOGGER.warning('No trades executed.')
-    return
+    summary = f'Input file: {data_file_str} | No trades executed.'
+    print(summary)  # noqa: T201
+    return summary
   wins = sum(1 for trade in trades if trade.result == 'take_profit')
   losses = sum(1 for trade in trades if trade.result == 'stop_loss')
   net = sum(trade.pnl for trade in trades)
@@ -383,10 +476,14 @@ def _summarize(
       net = _convert_sp500_net_to_eur(trades)
     except (ValueError, KeyError, TypeError) as exc:
       LOGGER.warning('Could not convert SP500 net to EUR: %s', exc)
-  print(  # noqa: T201
-      f'Trades: {len(trades)} | Wins: {wins} | Losses: {losses} | '
+  summary = (
+      f'Input file: {data_file_str} | Trades: {len(trades)} | '
+      f'Wins: {wins} | Losses: {losses} | '
+      f'Ratio: {wins / (wins + losses) if wins + losses else 0:.2f} | '
       f'Net: {net:.2f} EUR'
   )
+  print(summary)  # noqa: T201
+  return summary
 
 
 def _convert_sp500_net_to_eur(trades: Iterable[ExecutedOrder]) -> float:
@@ -421,32 +518,53 @@ def _fetch_average_eurusd_rate(year: int) -> float:
   closes = closes.dropna()
   if closes.empty:
     raise ValueError(f'No EUR/USD data available for year {year}.')
-  return closes.mean()
+  mean_value = closes.mean()
+  if isinstance(mean_value, pd.Series):
+    if mean_value.empty:
+      raise ValueError(f'No EUR/USD data available for year {year}.')
+    mean_value = mean_value.iloc[0]
+  return float(mean_value)
 
 
 def _load_data(
     csv_path: Path,
     start_date: Optional[pd.Timestamp] = None,
+    finish_date: Optional[pd.Timestamp] = None,
 ) -> pd.DataFrame:
   df = pd.read_csv(csv_path, parse_dates=['datetime'])
   df = df.set_index('datetime').sort_index()
   df = df[['open', 'high', 'low', 'close', 'volume']]
   if start_date is not None:
-    start_ts = pd.Timestamp(start_date)
-    index_tz = df.index.tz  # type: ignore
-    if index_tz is not None:
-      if start_ts.tz is None:
-        start_ts = start_ts.tz_localize(index_tz)
-      else:
-        start_ts = start_ts.tz_convert(index_tz)
-    elif start_ts.tz is not None:
-      start_ts = start_ts.tz_localize(None)
+    start_ts = _normalize_index_timestamp(df, pd.Timestamp(start_date))
     df = df[df.index >= start_ts]
     if df.empty:
       raise ValueError(
           f'No candles after the requested start date {start_ts.date()}.'
       )
+  if finish_date is not None:
+    finish_ts = _normalize_index_timestamp(df, pd.Timestamp(finish_date))
+    df = df[df.index <= finish_ts]
+    if df.empty:
+      raise ValueError(
+          f'No candles before the requested finish date {finish_ts.date()}.'
+      )
   return df
+
+
+def _normalize_index_timestamp(
+    df: pd.DataFrame,
+    value: pd.Timestamp,
+) -> pd.Timestamp:
+  index_tz = df.index.tz  # type: ignore[attr-defined]
+  normalized = value
+  if index_tz is not None:
+    if normalized.tz is None:
+      normalized = normalized.tz_localize(index_tz)
+    else:
+      normalized = normalized.tz_convert(index_tz)
+  elif normalized.tz is not None:
+    normalized = normalized.tz_localize(None)
+  return normalized
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -463,6 +581,19 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 def _build_arg_parser(lookback_default_value: int) -> argparse.ArgumentParser:
   """Build the argument parser for the simulator."""
   parser = argparse.ArgumentParser(description='Simple OHLC strategy simulator')
+  _add_simulator_arguments(parser, lookback_default_value)
+  return parser
+
+
+def _add_simulator_arguments(
+    parser: argparse.ArgumentParser,
+    lookback_default_value: int,
+) -> None:
+  _add_core_simulator_arguments(parser)
+  _add_runtime_arguments(parser, lookback_default_value)
+
+
+def _add_core_simulator_arguments(parser: argparse.ArgumentParser) -> None:
   parser.add_argument(
       '--strategy-module',
       default='sorul_tradingbot.strategy.private.volume_12',
@@ -475,7 +606,7 @@ def _build_arg_parser(lookback_default_value: int) -> argparse.ArgumentParser:
   )
   parser.add_argument(
       '--data-file',
-      default='sorul_tradingbot/strategy/simulator/data/sp500_5m_test.csv',
+      default='sorul_tradingbot/strategy/simulator/data/sp500_test.csv',
       help='CSV file with bars data.',
   )
   parser.add_argument(
@@ -483,6 +614,20 @@ def _build_arg_parser(lookback_default_value: int) -> argparse.ArgumentParser:
       default='SP500',
       help='Symbol to pass into the strategy.',
   )
+  parser.add_argument(
+      '--start-date',
+      help='Start date in YYYY-MM-DD format to begin the simulation.',
+  )
+  parser.add_argument(
+      '--finish-date',
+      help='Finish date in YYYY-MM-DD format to end the simulation.',
+  )
+
+
+def _add_runtime_arguments(
+    parser: argparse.ArgumentParser,
+    lookback_default_value: int,
+) -> None:
   parser.add_argument(
       '--no-progress',
       action='store_true',
@@ -499,18 +644,16 @@ def _build_arg_parser(lookback_default_value: int) -> argparse.ArgumentParser:
   )
   parser.add_argument(
       '--export-file',
-      default=  # noqa: E251
-      'sorul_tradingbot/strategy/simulator/outputs/simulation_payload.pkl',
+      default=(
+          'sorul_tradingbot/strategy/simulator/outputs/'
+          'simulation_payload.pkl'
+      ),
       help=(
-          'Optional path to persist candles and trades as a pickle payload '
-          'for notebook exploration.'
+          'Base path or directory to persist candles and trades as a pickle '
+          'payload for notebook exploration. A strategy/date subfolder is '
+          'created automatically.'
       ),
   )
-  parser.add_argument(
-      '--start-date',
-      help='Start date in YYYY-MM-DD format to begin the simulation.',
-  )
-  return parser
 
 
 def _export_results(
@@ -518,20 +661,80 @@ def _export_results(
     candles: pd.DataFrame,
     trades: Iterable[ExecutedOrder],
     active_orders: Iterable[ActiveOrder],
+    levels: Optional[Iterable[dict]] = None,
 ) -> None:
   """Persist simulation payload for later inspection in notebooks."""
   export_path = export_path.expanduser()
   export_path.parent.mkdir(parents=True, exist_ok=True)
   candles_df = candles.reset_index().rename(columns={'index': 'datetime'})
   executed_df, active_df = _orders_to_dataframe(trades, active_orders)
+  levels_df = (
+      pd.DataFrame(levels)
+      if levels is not None
+      else pd.DataFrame(
+          columns=['timestamp', 'levels_date', 'POC', 'VAH', 'VAL']
+      )
+  )
   payload = {
       'candles': candles_df,
       'closed_trades': executed_df,
       'open_trades': active_df,
+      'levels': levels_df,
   }
   with export_path.open('wb') as file_handle:
     pickle.dump(payload, file_handle)
   LOGGER.info(f'Exported simulation payload to {export_path}')
+
+
+def _resolve_export_paths(
+    export_path: Path,
+    strategy_module: str,
+    run_date: datetime,
+) -> Tuple[Path, Path]:
+  """Build output paths for the payload and strategy snapshot."""
+  export_path = export_path.expanduser()
+  strategy_name = _safe_strategy_name(strategy_module)
+  if export_path.suffix:
+    base_dir = export_path.parent
+    base_name = export_path.stem
+  else:
+    base_dir = export_path
+    base_name = 'simulation_payload'
+  if base_name.endswith(f'_{strategy_name}'):
+    payload_name = f'{base_name}.pkl'
+  else:
+    payload_name = f'{base_name}_{strategy_name}.pkl'
+  timestamp = run_date.strftime('%Y-%m-%d_%H-%M')
+  run_dir = base_dir / f'{strategy_name}_{timestamp}'
+  return run_dir / payload_name, run_dir / f'{strategy_name}.py'
+
+
+def _safe_strategy_name(strategy_module: str) -> str:
+  base_name = strategy_module.rsplit('.', 1)[-1]
+  safe_name = ''.join(
+      ch if (ch.isalnum() or ch in ('-', '_')) else '_' for ch in base_name
+  )
+  return safe_name or 'strategy'
+
+
+def _snapshot_strategy(
+    strategy_module: str,
+    destination: Path,
+) -> None:
+  """Copy the strategy source file into the output directory."""
+  module = importlib.import_module(strategy_module)
+  module_path = getattr(module, '__file__', None)
+  if not module_path:
+    LOGGER.warning('Strategy module has no file to snapshot.')
+    return
+  source_path = Path(module_path)
+  if source_path.suffix == '.pyc':
+    source_path = source_path.with_suffix('.py')
+  if not source_path.exists():
+    LOGGER.warning(f'Strategy file not found for snapshot: {source_path}')
+    return
+  destination.parent.mkdir(parents=True, exist_ok=True)
+  shutil.copy2(source_path, destination)
 
 
 def _orders_to_dataframe(
@@ -548,6 +751,7 @@ def _orders_to_dataframe(
             'ticket': order.ticket,
             'symbol': order.symbol,
             'side': side,
+            'comment': order.comment,
             'entry_time': trade.entry_time,
             'exit_time': trade.exit_time,
             'entry_price': trade.entry_price,
@@ -568,6 +772,7 @@ def _orders_to_dataframe(
             'ticket': order.ticket,
             'symbol': order.symbol,
             'side': side,
+            'comment': order.comment,
             'entry_time': active.entry_time,
             'entry_price': active.entry_price,
             'take_profit': order.take_profit,

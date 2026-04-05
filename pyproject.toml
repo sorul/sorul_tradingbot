@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "sorul_tradingbot"
-version = "0.3.0"
+version = "0.3.2"
 description = ""
 authors = ["sorul <cromerovargas2d@gmail.com>"]
 
@@ -8,7 +8,8 @@ authors = ["sorul <cromerovargas2d@gmail.com>"]
 python = "3.11.0"
 tradeo = {path = "../tradeo", develop = true}
 tqdm = "^4.67.1"
-urllib3 = "^2.6.0"
+urllib3 = "^2.6.3"
+
 
 [tool.poetry.group.dev.dependencies]
 freezegun = "^1.5.1"
@@ -38,6 +39,11 @@ mplfinance = "^0.12.10b0"
 plotly = "^6.3.1"
 nbformat = "^5.10.4"
 yfinance = "^0.2.66"
+notebook = "^7.5.1"
+pandoc = "^2.4"
+ipywidgets = "^8.1.8"
+anywidget = "^0.9.21"
+protobuf = "^6.33.5"
 
 [tool.poetry.scripts]
 run_forex = "sorul_tradingbot.main_forex:run"

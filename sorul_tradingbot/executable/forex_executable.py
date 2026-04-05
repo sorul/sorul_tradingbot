@@ -69,10 +69,8 @@ class ForexExecutable(Executable):
     self._send_profit_message(mt_client, local_date)
 
     # Send commands to obtain the historical data
-    [
-        mt_client.get_historical_data(s, Config.timeframe)
-        for s in Config.symbols
-    ]
+    for symbol in Config.symbols:
+      mt_client.get_historical_data(symbol, Config.timeframe)
 
     # Send commands to obtain bid/ask
     mt_client.subscribe_symbols(Config.symbols)
@@ -144,8 +142,9 @@ class ForexExecutable(Executable):
     last_balance = get_last_balance()
     difference = balance - last_balance
     emoji = '🚀' if difference >= 0 else '☔'
-    message_condition = local_date.hour == 12 and local_date.minute == 5
-    if message_condition and balance != -1:
+    day_condition = local_date.weekday() == 0  # Monday
+    hour_condition = local_date.hour == 12 and local_date.minute == 5
+    if day_condition and hour_condition and balance != -1:
       log.info(f'{emoji} {difference:.2f} €')
       write_file(Files.LAST_BALANCE.value, str(balance))
       return True
