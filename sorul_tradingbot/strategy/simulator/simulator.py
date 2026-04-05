@@ -296,18 +296,19 @@ class StrategySimulator:
     if not self._supports_levels:
       return
     heikin = calculate_heikin_ashi(ohlc)
-    start_t, end_t = self.strategy._get_session_times(  # type: ignore[attr-defined]
-        now
+    get_session_times = (
+        self.strategy._get_session_times  # type: ignore[attr-defined]
     )
+    start_t, end_t = get_session_times(now)
     daily_levels = calculate_poc_vah_val(
         heikin,
         session_start=start_t.strftime('%H:%M'),
         session_end=end_t.strftime('%H:%M'),
     )
-    prev_date = self.strategy._get_previous_available_date(  # type: ignore[attr-defined]
-        now,
-        daily_levels,
+    get_previous_date = (
+        self.strategy._get_previous_available_date  # type: ignore[attr-defined]
     )
+    prev_date = get_previous_date(now, daily_levels)
     if prev_date and prev_date in daily_levels:
       levels = daily_levels[prev_date]
       self._levels.append(
@@ -328,36 +329,60 @@ class StrategySimulator:
           iterator, total=len(self.data), desc='Simulating', unit='bar'
       )
     for idx, (timestamp, row) in enumerate(iterator, start=1):
-      now = timestamp.to_pydatetime()  # type: ignore
-      self.mt_client.set_now(now)
-      close_price = float(row.close)
-      self.mt_client.set_market_snapshot(self.symbol, close_price, close_price)
-      self.mt_client.evaluate_positions(row, now)
-      # Manage any still-open orders before generating new ones.
-      for order in list(self.mt_client.open_orders):
-        if order.order_type.pending:
-          self.strategy.handle_pending_orders(order)
-        elif order.order_type.market:
-          self.strategy.handle_filled_orders(order)
-      end_ts = pd.Timestamp(timestamp)  # type: ignore
-      start_ts = end_ts - pd.Timedelta(days=self._lookback_days)
-      # Limit to a fixed trailing window to keep compute bounded.
-      window = self.data.loc[start_ts:end_ts]
-      if window.empty:
-        window = self.data.iloc[:idx]
-      ohlc = OHLC(
-          window,
-          volume_column_name='volume',
-      )
-      self._capture_levels(ohlc, now)
-      possible_order = self.strategy.indicator(ohlc, self.symbol, now)
-      if possible_order and self.strategy.check_order_viability(possible_order):
-        if possible_order.order_type.market and not possible_order.price:
-          possible_order._mutable_details._prices.price = close_price  # type: ignore
-        self.mt_client.create_new_order(possible_order)
+      self._process_row(idx, timestamp, row)
     if self._show_progress:
       tqdm.write('Simulation completed')
     return self.mt_client.closed_trades
+
+  def _process_row(
+      self,
+      idx: int,
+      timestamp: pd.Timestamp,
+      row: pd.Series,
+  ) -> None:
+    now = timestamp.to_pydatetime()  # type: ignore[union-attr]
+    close_price = float(row.close)
+    self.mt_client.set_now(now)
+    self.mt_client.set_market_snapshot(self.symbol, close_price, close_price)
+    self.mt_client.evaluate_positions(row, now)
+    self._handle_open_orders()
+    window = self._build_window(idx, timestamp)
+    ohlc = OHLC(window, volume_column_name='volume')
+    self._capture_levels(ohlc, now)
+    self._maybe_create_order(ohlc, now, close_price)
+
+  def _handle_open_orders(self) -> None:
+    # Manage any still-open orders before generating new ones.
+    for order in list(self.mt_client.open_orders):
+      if order.order_type.pending:
+        self.strategy.handle_pending_orders(order)
+      elif order.order_type.market:
+        self.strategy.handle_filled_orders(order)
+
+  def _build_window(self, idx: int, timestamp: pd.Timestamp) -> pd.DataFrame:
+    end_ts = pd.Timestamp(timestamp)
+    start_ts = end_ts - pd.Timedelta(days=self._lookback_days)
+    # Limit to a fixed trailing window to keep compute bounded.
+    window = self.data.loc[start_ts:end_ts]
+    if window.empty:
+      return self.data.iloc[:idx]
+    return window
+
+  def _maybe_create_order(
+      self,
+      ohlc: OHLC,
+      now: datetime,
+      close_price: float,
+  ) -> None:
+    possible_order = self.strategy.indicator(ohlc, self.symbol, now)
+    if not possible_order:
+      return
+    if not self.strategy.check_order_viability(possible_order):
+      return
+    if possible_order.order_type.market and not possible_order.price:
+      price_details = possible_order._mutable_details._prices  # type: ignore[attr-defined]  # noqa: E501
+      price_details.price = close_price
+    self.mt_client.create_new_order(possible_order)
 
 
 def main(argv: Optional[List[str]] = None) -> None:
@@ -366,18 +391,8 @@ def main(argv: Optional[List[str]] = None) -> None:
       level=logging.WARNING, format='[%(levelname)s] %(message)s'
   )
   args = parse_args(argv)
-  start_date = None
-  finish_date = None
-  if args.start_date:
-    try:
-      start_date = datetime.strptime(args.start_date, '%Y-%m-%d')
-    except ValueError as exc:
-      raise ValueError('Invalid start date format. Use YYYY-MM-DD.') from exc
-  if args.finish_date:
-    try:
-      finish_date = datetime.strptime(args.finish_date, '%Y-%m-%d')
-    except ValueError as exc:
-      raise ValueError('Invalid finish date format. Use YYYY-MM-DD.') from exc
+  start_date = _parse_optional_date(args.start_date, 'start')
+  finish_date = _parse_optional_date(args.finish_date, 'finish')
   if start_date and finish_date and start_date > finish_date:
     raise ValueError('Start date must be earlier than finish date.')
   csv_path = Path(args.data_file)
@@ -415,6 +430,20 @@ def main(argv: Optional[List[str]] = None) -> None:
     summary_path = export_path.parent / 'simulation_summary.txt'
     summary_payload = summary_text or 'No trades executed.'
     summary_path.write_text(f'{summary_payload}\n', encoding='utf-8')
+
+
+def _parse_optional_date(
+    value: Optional[str],
+    label: str,
+) -> Optional[datetime]:
+  if not value:
+    return None
+  try:
+    return datetime.strptime(value, '%Y-%m-%d')
+  except ValueError as exc:
+    raise ValueError(
+        f'Invalid {label} date format. Use YYYY-MM-DD.'
+    ) from exc
 
 
 def _load_strategy(
@@ -506,36 +535,36 @@ def _load_data(
   df = df.set_index('datetime').sort_index()
   df = df[['open', 'high', 'low', 'close', 'volume']]
   if start_date is not None:
-    start_ts = pd.Timestamp(start_date)
-    index_tz = df.index.tz  # type: ignore
-    if index_tz is not None:
-      if start_ts.tz is None:
-        start_ts = start_ts.tz_localize(index_tz)
-      else:
-        start_ts = start_ts.tz_convert(index_tz)
-    elif start_ts.tz is not None:
-      start_ts = start_ts.tz_localize(None)
+    start_ts = _normalize_index_timestamp(df, pd.Timestamp(start_date))
     df = df[df.index >= start_ts]
     if df.empty:
       raise ValueError(
           f'No candles after the requested start date {start_ts.date()}.'
       )
   if finish_date is not None:
-    finish_ts = pd.Timestamp(finish_date)
-    index_tz = df.index.tz  # type: ignore
-    if index_tz is not None:
-      if finish_ts.tz is None:
-        finish_ts = finish_ts.tz_localize(index_tz)
-      else:
-        finish_ts = finish_ts.tz_convert(index_tz)
-    elif finish_ts.tz is not None:
-      finish_ts = finish_ts.tz_localize(None)
+    finish_ts = _normalize_index_timestamp(df, pd.Timestamp(finish_date))
     df = df[df.index <= finish_ts]
     if df.empty:
       raise ValueError(
           f'No candles before the requested finish date {finish_ts.date()}.'
       )
   return df
+
+
+def _normalize_index_timestamp(
+    df: pd.DataFrame,
+    value: pd.Timestamp,
+) -> pd.Timestamp:
+  index_tz = df.index.tz  # type: ignore[attr-defined]
+  normalized = value
+  if index_tz is not None:
+    if normalized.tz is None:
+      normalized = normalized.tz_localize(index_tz)
+    else:
+      normalized = normalized.tz_convert(index_tz)
+  elif normalized.tz is not None:
+    normalized = normalized.tz_localize(None)
+  return normalized
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -552,6 +581,19 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 def _build_arg_parser(lookback_default_value: int) -> argparse.ArgumentParser:
   """Build the argument parser for the simulator."""
   parser = argparse.ArgumentParser(description='Simple OHLC strategy simulator')
+  _add_simulator_arguments(parser, lookback_default_value)
+  return parser
+
+
+def _add_simulator_arguments(
+    parser: argparse.ArgumentParser,
+    lookback_default_value: int,
+) -> None:
+  _add_core_simulator_arguments(parser)
+  _add_runtime_arguments(parser, lookback_default_value)
+
+
+def _add_core_simulator_arguments(parser: argparse.ArgumentParser) -> None:
   parser.add_argument(
       '--strategy-module',
       default='sorul_tradingbot.strategy.private.volume_12',
@@ -573,6 +615,20 @@ def _build_arg_parser(lookback_default_value: int) -> argparse.ArgumentParser:
       help='Symbol to pass into the strategy.',
   )
   parser.add_argument(
+      '--start-date',
+      help='Start date in YYYY-MM-DD format to begin the simulation.',
+  )
+  parser.add_argument(
+      '--finish-date',
+      help='Finish date in YYYY-MM-DD format to end the simulation.',
+  )
+
+
+def _add_runtime_arguments(
+    parser: argparse.ArgumentParser,
+    lookback_default_value: int,
+) -> None:
+  parser.add_argument(
       '--no-progress',
       action='store_true',
       help='Disable progress bar output.',
@@ -588,23 +644,16 @@ def _build_arg_parser(lookback_default_value: int) -> argparse.ArgumentParser:
   )
   parser.add_argument(
       '--export-file',
-      default=  # noqa: E251
-      'sorul_tradingbot/strategy/simulator/outputs/simulation_payload.pkl',
+      default=(
+          'sorul_tradingbot/strategy/simulator/outputs/'
+          'simulation_payload.pkl'
+      ),
       help=(
           'Base path or directory to persist candles and trades as a pickle '
           'payload for notebook exploration. A strategy/date subfolder is '
           'created automatically.'
       ),
   )
-  parser.add_argument(
-      '--start-date',
-      help='Start date in YYYY-MM-DD format to begin the simulation.',
-  )
-  parser.add_argument(
-      '--finish-date',
-      help='Finish date in YYYY-MM-DD format to end the simulation.',
-  )
-  return parser
 
 
 def _export_results(
@@ -622,7 +671,9 @@ def _export_results(
   levels_df = (
       pd.DataFrame(levels)
       if levels is not None
-      else pd.DataFrame(columns=['timestamp', 'levels_date', 'POC', 'VAH', 'VAL'])
+      else pd.DataFrame(
+          columns=['timestamp', 'levels_date', 'POC', 'VAH', 'VAL']
+      )
   )
   payload = {
       'candles': candles_df,
@@ -633,14 +684,6 @@ def _export_results(
   with export_path.open('wb') as file_handle:
     pickle.dump(payload, file_handle)
   LOGGER.info(f'Exported simulation payload to {export_path}')
-
-
-def _safe_strategy_name(strategy_module: str) -> str:
-  base_name = strategy_module.rsplit('.', 1)[-1]
-  safe_name = ''.join(
-      ch if (ch.isalnum() or ch in ('-', '_')) else '_' for ch in base_name
-  )
-  return safe_name or 'strategy'
 
 
 def _resolve_export_paths(
@@ -664,6 +707,14 @@ def _resolve_export_paths(
   timestamp = run_date.strftime('%Y-%m-%d_%H-%M')
   run_dir = base_dir / f'{strategy_name}_{timestamp}'
   return run_dir / payload_name, run_dir / f'{strategy_name}.py'
+
+
+def _safe_strategy_name(strategy_module: str) -> str:
+  base_name = strategy_module.rsplit('.', 1)[-1]
+  safe_name = ''.join(
+      ch if (ch.isalnum() or ch in ('-', '_')) else '_' for ch in base_name
+  )
+  return safe_name or 'strategy'
 
 
 def _snapshot_strategy(

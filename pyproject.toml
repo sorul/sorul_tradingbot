@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "sorul_tradingbot"
-version = "0.3.1"
+version = "0.3.2"
 description = ""
 authors = ["sorul <cromerovargas2d@gmail.com>"]
 

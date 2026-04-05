@@ -4,7 +4,11 @@ flake8:
 	@poetry run flake8 --config config/tox.ini
 
 test:
-	@poetry run pytest --cov=tradeo
+	@if rg --files -g 'test*.py' -g '*test*.py' -g 'tests/**' | grep -q .; then \
+		poetry run pytest --cov=sorul_tradingbot; \
+	else \
+		echo "No tests found. Skipping pytest."; \
+	fi
 
 requirements:
 	poetry lock
@@ -26,12 +30,18 @@ check_merge_master:
 		echo "ERROR: check_merge_master must run from develop (current: $$current_branch)"; \
 		exit 1; \
 	fi
-	@git fetch origin
-	@echo "Checking merge conflicts between develop and origin/master..."
 	@set -e; \
-	base_commit=$$(git merge-base HEAD origin/master); \
+	git fetch origin; \
+	master_ref=origin/master; \
+	if git show-ref --verify --quiet refs/heads/master; then \
+		if git merge-base --is-ancestor origin/master master; then \
+			master_ref=master; \
+		fi; \
+	fi; \
+	echo "Checking merge conflicts between develop and $$master_ref..."; \
+	base_commit=$$(git merge-base HEAD "$$master_ref"); \
 	merge_output=$$(mktemp); \
-	git merge-tree "$$base_commit" HEAD origin/master > "$$merge_output"; \
+	git merge-tree "$$base_commit" HEAD "$$master_ref" > "$$merge_output"; \
 	conflict_files=$$(awk '/^changed in both$$/{getline; if ($$1 == "base") print $$NF}' "$$merge_output"); \
 	if [ -z "$$conflict_files" ]; then \
 		rm -f "$$merge_output"; \
