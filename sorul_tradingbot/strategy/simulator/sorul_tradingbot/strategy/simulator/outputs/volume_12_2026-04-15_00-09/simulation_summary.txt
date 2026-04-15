@@ -1,1 +1,0 @@
-Input file: data/sp500_2026.csv | Trades: 5 | Wins: 0 | Losses: 5 | Ratio: 0.00 | Net: -25.95 EUR
