@@ -428,7 +428,10 @@ def main(argv: Optional[List[str]] = None) -> None:
     )
     _snapshot_strategy(args.strategy_module, snapshot_path)
     summary_path = export_path.parent / 'simulation_summary.txt'
-    summary_payload = summary_text or 'No trades executed.'
+    summary_payload = _build_simulation_summary_payload(
+        summary_text or 'No trades executed.',
+        args,
+    )
     summary_path.write_text(f'{summary_payload}\n', encoding='utf-8')
 
 
@@ -484,6 +487,25 @@ def _summarize(
   )
   print(summary)  # noqa: T201
   return summary
+
+
+def _build_simulation_summary_payload(
+    summary_text: str,
+    args: argparse.Namespace,
+) -> str:
+  """Build the text payload written to simulation_summary.txt."""
+  input_parameters = [
+      f'{parameter}: {value}'
+      for parameter, value in sorted(vars(args).items())
+  ]
+  return '\n'.join(
+      [
+          summary_text,
+          '',
+          'Input parameters:',
+          *input_parameters,
+      ]
+  )
 
 
 def _convert_sp500_net_to_eur(trades: Iterable[ExecutedOrder]) -> float:
@@ -596,7 +618,7 @@ def _add_simulator_arguments(
 def _add_core_simulator_arguments(parser: argparse.ArgumentParser) -> None:
   parser.add_argument(
       '--strategy-module',
-      default='sorul_tradingbot.strategy.private.volume_12',
+      default='sorul_tradingbot.strategy.private.volume_16',
       help='Dotted path to the strategy module.',
   )
   parser.add_argument(
@@ -646,7 +668,6 @@ def _add_runtime_arguments(
       '--export-file',
       default=(
           'sorul_tradingbot/strategy/simulator/outputs/'
-          'simulation_payload.pkl'
       ),
       help=(
           'Base path or directory to persist candles and trades as a pickle '
