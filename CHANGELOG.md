@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## v0.3.3 (2026/05/02)
+- fix:
+  - Improve simulator time handling, level capture, and summaries.
+  - Guard forex entry creation with fresh historical trades in "forex_executable.py"
+
 ## v0.3.2 (2026/04/04)
 - fix:
 	- Update urllib3, pillow, requests, protobuf and tornado libs to address security vulnerability.
