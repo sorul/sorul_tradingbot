@@ -12,6 +12,8 @@
         "${input:SimulatorDataFile}",
         "--strategy-module",
         "${input:SimulatorStrategyModule}",
+        "--description",
+        "${input:SimulatorDescription}",
         "--start-date",
         "${input:SimulatorStartDate}",
         "--finish-date",
@@ -42,6 +44,12 @@
       "type": "promptString",
       "description": "Ruta del módulo de estrategia (p.ej. sorul_tradingbot.strategy.private.volume_12)",
       "default": "sorul_tradingbot.strategy.private.volume_12"
+    },
+    {
+      "id": "SimulatorDescription",
+      "type": "promptString",
+      "description": "Notas libres para guardar en simulation_summary.txt",
+      "default": ""
     },
     {
       "id": "SimulatorStartDate",

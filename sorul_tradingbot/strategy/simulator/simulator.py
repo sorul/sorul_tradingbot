@@ -1,18 +1,25 @@
 """Simple simulator loop to backtest Tradeo strategies."""
 import argparse
+from contextlib import ExitStack, contextmanager
 import importlib
 import logging
 import os
 import pickle
 import shutil
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple, Type
+from unittest.mock import patch
 
 import pandas as pd
 from tqdm import tqdm
 import yfinance as yf
+import tradeo
+import tradeo.utils as tradeo_utils
+import tradeo.strategies.strategy as tradeo_strategy
+from tradeo.config import Config
 from tradeo.ohlc import OHLC
 from tradeo.order import Order
 from tradeo.strategies.strategy import Strategy
@@ -22,6 +29,70 @@ logging.getLogger('tradeo').setLevel(logging.WARNING)
 logging.getLogger().setLevel(logging.WARNING)  # si usan el root
 
 LOGGER = logging.getLogger(__name__)
+PNL_BREAK_EVEN_THRESHOLD = 0.01
+
+
+def _create_magic_number_for_datetime(now: datetime) -> str:
+  """Mirror Tradeo magic-number generation using the simulated time."""
+  if now.tzinfo is None:
+    current_time = Config.utc_timezone.localize(now)
+  else:
+    current_time = now.astimezone(Config.utc_timezone)
+  return str(round(current_time.timestamp())).replace('.', '')
+
+
+def _datetime_class_for(now: datetime) -> Type[datetime]:
+  """Build a datetime subclass whose now() returns the simulated time."""
+  simulated_now = now
+
+  class SimulatedDateTime(datetime):
+    @classmethod
+    def now(cls, tz=None):  # type: ignore[override]
+      if tz is None:
+        if simulated_now.tzinfo is None:
+          return simulated_now
+        return simulated_now.replace(tzinfo=None)
+      if simulated_now.tzinfo is None:
+        return Config.utc_timezone.localize(simulated_now).astimezone(tz)
+      return simulated_now.astimezone(tz)
+
+  return SimulatedDateTime
+
+
+@contextmanager
+def _patch_magic_number(strategy: Strategy, now: datetime):
+  """Patch magic-number generation so strategies use simulator time."""
+  strategy_module = sys.modules.get(strategy.__class__.__module__)
+  patched_create_magic_number = lambda: _create_magic_number_for_datetime(now)
+  targets = [tradeo_utils, tradeo, strategy_module]
+
+  with ExitStack() as stack:
+    for target in targets:
+      if target is None or not hasattr(target, 'create_magic_number'):
+        continue
+      stack.enter_context(
+          patch.object(
+              target,
+              'create_magic_number',
+              patched_create_magic_number,
+          )
+      )
+    yield
+
+
+@contextmanager
+def _patch_strategy_datetime(strategy: Strategy, now: datetime):
+  """Patch strategy datetime.now() calls so management uses simulator time."""
+  strategy_module = sys.modules.get(strategy.__class__.__module__)
+  simulated_datetime = _datetime_class_for(now)
+  targets = [tradeo_strategy, strategy_module]
+
+  with ExitStack() as stack:
+    for target in targets:
+      if target is None or not hasattr(target, 'datetime'):
+        continue
+      stack.enter_context(patch.object(target, 'datetime', simulated_datetime))
+    yield
 
 
 @dataclass
@@ -44,9 +115,64 @@ class ExecutedOrder:
   pnl: float
 
   @property
-  def execution_time(self) -> datetime:
-    """Expose execution_time to mimic Trade objects."""
+  def ticket(self) -> int:
+    """Expose the trade ticket."""
+    return self.order.ticket
+
+  @property
+  def symbol(self) -> str:
+    """Expose the traded symbol."""
+    return self.order.symbol
+
+  @property
+  def trade_type(self) -> str:
+    """Expose the trade type using the same shape as Trade."""
+    return self.order.order_type.value
+
+  @property
+  def entry(self) -> str:
+    """Represent this simulated trade as a closed deal."""
+    return 'out'
+
+  @property
+  def magic(self) -> int:
+    """Expose the magic number as an integer like Trade."""
+    return int(self.order.magic)
+
+  @property
+  def comment(self) -> str:
+    """Expose the trade comment."""
+    return self.order.comment
+
+  @property
+  def lots(self) -> float:
+    """Expose the traded volume."""
+    return self.order.lots
+
+  @property
+  def deal_price(self) -> float:
+    """Expose the closing price as the simulated deal price."""
+    return self.exit_price
+
+  @property
+  def commission(self) -> float:
+    """Expose a zero commission to match Trade's API."""
+    return 0.0
+
+  @property
+  def swap(self) -> float:
+    """Expose a zero swap to match Trade's API."""
+    return 0.0
+
+  @property
+  def deal_time(self) -> datetime:
+    """Expose the closing time as the simulated deal time."""
     return self.exit_time
+
+  @property
+  def execution_time(self) -> datetime:
+    """Expose the opening time as the simulated execution time."""
+    return self.entry_time
 
 
 class SimulatedMTClient:
@@ -270,7 +396,7 @@ class StrategySimulator:
       symbol: str,
       mt_client: SimulatedMTClient,
       show_progress: bool = True,
-      lookback_days: int = 5,
+      lookback_days: int = 14,
   ) -> None:
     """Initialize the StrategySimulator."""
     self.strategy = strategy
@@ -282,7 +408,10 @@ class StrategySimulator:
       raise ValueError('lookback_days must be a positive integer.')
     self._lookback_days = lookback_days
     self._levels: List[dict] = []
-    self._supports_levels = all(
+    self._strategy_levels_provider = getattr(
+        strategy, 'get_current_levels_snapshot', None
+    )
+    self._supports_legacy_levels = all(
         hasattr(strategy, attr)
         for attr in ('_get_session_times', '_get_previous_available_date')
     )
@@ -293,7 +422,11 @@ class StrategySimulator:
 
   def _capture_levels(self, ohlc: OHLC, now: datetime) -> None:
     """Capture previous-session levels matching the strategy logic."""
-    if not self._supports_levels:
+    if callable(self._strategy_levels_provider):
+      levels = self._strategy_levels_provider(ohlc, now, self.symbol)
+      self._append_levels_snapshot(levels)
+      return
+    if not self._supports_legacy_levels:
       return
     heikin = calculate_heikin_ashi(ohlc)
     get_session_times = (
@@ -311,7 +444,7 @@ class StrategySimulator:
     prev_date = get_previous_date(now, daily_levels)
     if prev_date and prev_date in daily_levels:
       levels = daily_levels[prev_date]
-      self._levels.append(
+      self._append_levels_snapshot(
           {
               'timestamp': now,
               'levels_date': pd.Timestamp(prev_date),
@@ -320,6 +453,12 @@ class StrategySimulator:
               'VAL': levels['VAL'],
           }
       )
+
+  def _append_levels_snapshot(self, levels: Optional[dict]) -> None:
+    """Append a strategy-provided levels snapshot if one is available."""
+    if not levels:
+      return
+    self._levels.append(dict(levels))
 
   def run(self) -> List[ExecutedOrder]:
     """Execute the simulation and return closed orders."""
@@ -353,11 +492,14 @@ class StrategySimulator:
 
   def _handle_open_orders(self) -> None:
     # Manage any still-open orders before generating new ones.
-    for order in list(self.mt_client.open_orders):
-      if order.order_type.pending:
-        self.strategy.handle_pending_orders(order)
-      elif order.order_type.market:
-        self.strategy.handle_filled_orders(order)
+    if self.mt_client.current_time is None:
+      return
+    with _patch_strategy_datetime(self.strategy, self.mt_client.current_time):
+      for order in list(self.mt_client.open_orders):
+        if order.order_type.pending:
+          self.strategy.handle_pending_orders(order)
+        elif order.order_type.market:
+          self.strategy.handle_filled_orders(order)
 
   def _build_window(self, idx: int, timestamp: pd.Timestamp) -> pd.DataFrame:
     end_ts = pd.Timestamp(timestamp)
@@ -374,10 +516,11 @@ class StrategySimulator:
       now: datetime,
       close_price: float,
   ) -> None:
-    possible_order = self.strategy.indicator(ohlc, self.symbol, now)
+    with _patch_magic_number(self.strategy, now):
+      possible_order = self.strategy.indicator(ohlc, self.symbol, now)
     if not possible_order:
       return
-    if not self.strategy.check_order_viability(possible_order):
+    if not self.strategy.check_order_viability(possible_order, date=now):
       return
     if possible_order.order_type.market and not possible_order.price:
       price_details = possible_order._mutable_details._prices  # type: ignore[attr-defined]  # noqa: E501
@@ -428,7 +571,10 @@ def main(argv: Optional[List[str]] = None) -> None:
     )
     _snapshot_strategy(args.strategy_module, snapshot_path)
     summary_path = export_path.parent / 'simulation_summary.txt'
-    summary_payload = summary_text or 'No trades executed.'
+    summary_payload = _build_simulation_summary_payload(
+        summary_text or 'No trades executed.',
+        args,
+    )
     summary_path.write_text(f'{summary_payload}\n', encoding='utf-8')
 
 
@@ -468,8 +614,9 @@ def _summarize(
     summary = f'Input file: {data_file_str} | No trades executed.'
     print(summary)  # noqa: T201
     return summary
-  wins = sum(1 for trade in trades if trade.result == 'take_profit')
-  losses = sum(1 for trade in trades if trade.result == 'stop_loss')
+  wins = sum(1 for trade in trades if trade.pnl > PNL_BREAK_EVEN_THRESHOLD)
+  losses = sum(1 for trade in trades if trade.pnl < -PNL_BREAK_EVEN_THRESHOLD)
+  break_evens = len(trades) - wins - losses
   net = sum(trade.pnl for trade in trades)
   if symbol.upper() == 'SP500':
     try:
@@ -478,12 +625,42 @@ def _summarize(
       LOGGER.warning('Could not convert SP500 net to EUR: %s', exc)
   summary = (
       f'Input file: {data_file_str} | Trades: {len(trades)} | '
-      f'Wins: {wins} | Losses: {losses} | '
+      f'Wins: {wins} | Losses: {losses} | Break even: {break_evens} | '
       f'Ratio: {wins / (wins + losses) if wins + losses else 0:.2f} | '
       f'Net: {net:.2f} EUR'
   )
   print(summary)  # noqa: T201
   return summary
+
+
+def _build_simulation_summary_payload(
+    summary_text: str,
+    args: argparse.Namespace,
+) -> str:
+  """Build the text payload written to simulation_summary.txt."""
+  description = getattr(args, 'description', None)
+  input_parameters = [
+      f'{parameter}: {value}'
+      for parameter, value in sorted(vars(args).items())
+      if parameter != 'description'
+  ]
+  lines = [summary_text]
+  if description:
+    lines.extend(
+        [
+            '',
+            'Description:',
+            description,
+        ]
+    )
+  lines.extend(
+      [
+          '',
+          'Input parameters:',
+          *input_parameters,
+      ]
+  )
+  return '\n'.join(lines)
 
 
 def _convert_sp500_net_to_eur(trades: Iterable[ExecutedOrder]) -> float:
@@ -567,11 +744,64 @@ def _normalize_index_timestamp(
   return normalized
 
 
+def build_simulation_heikin_ashi(
+    candles: pd.DataFrame,
+    lookback_days: int = 14,
+) -> pd.DataFrame:
+  """Rebuild Heikin Ashi candles using the simulator's rolling window logic.
+
+  This reproduces the same behavior as the simulator: for each timestamp, it
+  computes Heikin Ashi using only the trailing ``lookback_days`` window and
+  keeps the last transformed candle. The returned DataFrame can be plotted
+  directly because it contains the full transformed series.
+  """
+  if lookback_days <= 0:
+    raise ValueError('lookback_days must be a positive integer.')
+  if candles.empty:
+    return pd.DataFrame(
+        columns=['datetime', 'open', 'high', 'low', 'close', 'volume']
+    )
+
+  candles_df = candles.copy()
+  if 'datetime' in candles_df.columns:
+    candles_df['datetime'] = pd.to_datetime(candles_df['datetime'])
+    candles_df = candles_df.set_index('datetime')
+  elif candles_df.index.name != 'datetime':
+    candles_df.index = pd.to_datetime(candles_df.index)
+
+  candles_df = candles_df.sort_index()
+  required_columns = ['open', 'high', 'low', 'close', 'volume']
+  missing_columns = [
+      column for column in required_columns if column not in candles_df.columns
+  ]
+  if missing_columns:
+    missing = ', '.join(missing_columns)
+    raise ValueError(f'Candles DataFrame is missing required columns: {missing}')
+
+  transformed_rows = []
+  for idx, timestamp in enumerate(candles_df.index, start=1):
+    end_ts = pd.Timestamp(timestamp)
+    start_ts = end_ts - pd.Timedelta(days=lookback_days)
+    window = candles_df.loc[start_ts:end_ts]
+    if window.empty:
+      window = candles_df.iloc[:idx]
+    heikin_window = calculate_heikin_ashi(
+        OHLC(window, volume_column_name='volume')
+    ).to_dataframe()
+    last_row = heikin_window.iloc[-1].copy()
+    last_row.name = timestamp
+    transformed_rows.append(last_row)
+
+  transformed_df = pd.DataFrame(transformed_rows)
+  transformed_df.index.name = 'datetime'
+  return transformed_df
+
+
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
   """Parse command-line arguments for the OHLC strategy simulator."""
   default_lookback = os.getenv('TB_LOOKBACK_DAYS')
   try:
-    lookback_default_value = int(default_lookback) if default_lookback else 5
+    lookback_default_value = int(default_lookback) if default_lookback else 14
   except ValueError as exc:
     raise ValueError('TB_LOOKBACK_DAYS must be an integer if defined.') from exc
   parser = _build_arg_parser(lookback_default_value)
@@ -596,7 +826,7 @@ def _add_simulator_arguments(
 def _add_core_simulator_arguments(parser: argparse.ArgumentParser) -> None:
   parser.add_argument(
       '--strategy-module',
-      default='sorul_tradingbot.strategy.private.volume_12',
+      default='sorul_tradingbot.strategy.private.volume_16',
       help='Dotted path to the strategy module.',
   )
   parser.add_argument(
@@ -622,6 +852,10 @@ def _add_core_simulator_arguments(parser: argparse.ArgumentParser) -> None:
       '--finish-date',
       help='Finish date in YYYY-MM-DD format to end the simulation.',
   )
+  parser.add_argument(
+      '--description',
+      help='Free-form notes to store in simulation_summary.txt.',
+  )
 
 
 def _add_runtime_arguments(
@@ -639,14 +873,13 @@ def _add_runtime_arguments(
       default=lookback_default_value,
       help=(
           'Number of trailing days to provide to the strategy on each step '
-          'during the simulation (defaults to TB_LOOKBACK_DAYS or 5).'
+          'during the simulation (defaults to TB_LOOKBACK_DAYS or 14).'
       ),
   )
   parser.add_argument(
       '--export-file',
       default=(
           'sorul_tradingbot/strategy/simulator/outputs/'
-          'simulation_payload.pkl'
       ),
       help=(
           'Base path or directory to persist candles and trades as a pickle '

@@ -8,7 +8,7 @@ from tradeo.strategies.strategy import Strategy
 from datetime import datetime
 from typing import List
 
-from sorul_tradingbot.strategy.private.volume_16 import Volume as Volume16
+from sorul_tradingbot.strategy.private.volume_17 import Volume as Volume17
 
 
 class ForexEventHandler(EventHandler):
@@ -26,13 +26,16 @@ class ForexEventHandler(EventHandler):
     """Handle the return of GET_HISTORICAL_DATA command."""
     now_date = datetime.now(Config.utc_timezone)
     strategies: List[Strategy] = [
-        Volume16(mt_client),
+        Volume17(mt_client),
     ]
     for strategy in strategies:
       possible_order = strategy.indicator(data, symbol, now_date)
       viable = False
       if possible_order is not None:
-        viable = strategy.check_order_viability(possible_order)
+        viable = strategy.check_order_viability(
+            order=possible_order,
+            date=now_date,
+        )
       if possible_order is not None and viable:
         log.info(f'💥 New order: {possible_order}')
         mt_client.create_new_order(possible_order)

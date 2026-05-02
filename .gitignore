@@ -163,8 +163,6 @@ cython_debug/
 !**/strategy/private/__init__.py
 memo.md
 *.pkl
-sorul_tradingbot/strategy/simulator/data/*
-!sorul_tradingbot/strategy/simulator/data/sp500_test.csv
 
 metatrader/*
 !metatrader/root/
@@ -173,4 +171,5 @@ metatrader/*
 sorul_tradingbot/strategy/simulator/data/*
 sorul_tradingbot/strategy/simulator/outputs/*
 !sorul_tradingbot/strategy/simulator/data/.gitkeep
+!sorul_tradingbot/strategy/simulator/data/sp500_test.csv
 !sorul_tradingbot/strategy/simulator/outputs/.gitkeep

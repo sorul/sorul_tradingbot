@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "sorul_tradingbot"
-version = "0.3.2"
+version = "0.3.3"
 description = ""
 authors = ["sorul <cromerovargas2d@gmail.com>"]
 
@@ -44,6 +44,8 @@ pandoc = "^2.4"
 ipywidgets = "^8.1.8"
 anywidget = "^0.9.21"
 protobuf = "^6.33.5"
+openpyxl = "^3.1.5"
+tabulate = "^0.10.0"
 
 [tool.poetry.scripts]
 run_forex = "sorul_tradingbot.main_forex:run"

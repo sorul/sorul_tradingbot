@@ -41,7 +41,7 @@ class ForexExecutable(Executable):
         # Log the error
         log.error(traceback.format_exc())
 
-  def main(self, mt_client: MT_Client):
+  def main(self, mt_client: MT_Client) -> None:
     """Execute forex bot."""
     # First of all, we lock the execution of the forex bot.
     # To prevent another execution to run at the same time.
@@ -67,6 +67,18 @@ class ForexExecutable(Executable):
 
     # Send profit message
     self._send_profit_message(mt_client, local_date)
+
+    # Avoid opening new entries with stale closed-trade history. The viability
+    # checks rely on historical_trades to know whether the strategy already
+    # traded today.
+    if not mt_client.ensure_historical_trades_current(
+        timeout_seconds=5,
+        max_age_seconds=120,
+        lookback_days=2,
+    ):
+      log.warning('Skipping new entries because historical trades are stale')
+      self.finish(mt_client)
+      return
 
     # Send commands to obtain the historical data
     for symbol in Config.symbols:
