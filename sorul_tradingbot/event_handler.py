@@ -13,7 +13,6 @@ from sorul_tradingbot.strategy.private.volume_17 import Volume as Volume17
 
 class ForexEventHandler(EventHandler):
   """This class only provides 'on_historical_data' event holder."""
-
   def __init__(self):
     """Initialize the attributes."""
     super().__init__('ForexEventHandler')
