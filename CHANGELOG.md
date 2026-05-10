@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## v0.4.0 (2026/05/10)
+- feat:
+  - Configure `MT_Client` pollers explicitly for the forex executable.
+  - Request historical data in batch and wait for it with `wait_historical_data`.
+- fix:
+  - Skip new forex entries when historical trades are stale.
+
+
 ## v0.3.3 (2026/05/02)
 - fix:
   - Improve simulator time handling, level capture, and summaries.
