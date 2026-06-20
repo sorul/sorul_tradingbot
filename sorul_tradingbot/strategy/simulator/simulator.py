@@ -23,7 +23,11 @@ from tradeo.config import Config
 from tradeo.ohlc import OHLC
 from tradeo.order import Order
 from tradeo.strategies.strategy import Strategy
-from tradeo.trading_methods import calculate_heikin_ashi, calculate_poc_vah_val
+from tradeo.trading_methods import (
+    calculate_heikin_ashi,
+    calculate_poc_vah_val,
+    get_pip,
+)
 
 logging.getLogger('tradeo').setLevel(logging.WARNING)
 logging.getLogger().setLevel(logging.WARNING)  # si usan el root
@@ -319,11 +323,30 @@ class SimulatedMTClient:
     )
 
   def place_break_even(self, order: Order, log_comment: str = '') -> None:
-    """Move the stop loss to the entry price to mimic a break-even."""
+    """Move the stop loss like MT_Client or close if already crossed."""
     active = self._active_orders.get(order.ticket)
     if not active:
       return
-    break_even = active.entry_price
+    pip = get_pip(order.symbol)
+    break_even = (
+        order.price + pip if order.order_type.buy else order.price - pip
+    )
+    close_price = self._resolve_close_price(order, fallback=0)
+    if (
+        close_price
+        and self._now is not None
+        and self._is_stop_already_crossed(order, break_even, close_price)
+    ):
+      self._close_order(order, close_price, self._now, 'stop_loss')
+      LOGGER.info(
+          'Break even crossed before placement ticket=%s '
+          'break_even=%.5f close_price=%.5f reason=%s',
+          order.ticket,
+          break_even,
+          close_price,
+          log_comment,
+      )
+      return
     order._mutable_details._prices.stop_loss = break_even  # type: ignore
     LOGGER.info(
         'Break even placed ticket=%s price=%.5f reason=%s',
@@ -331,6 +354,17 @@ class SimulatedMTClient:
         break_even,
         log_comment,
     )
+
+  @staticmethod
+  def _is_stop_already_crossed(
+      order: Order,
+      stop_loss: float,
+      close_price: float,
+  ) -> bool:
+    """Return whether the current executable price has crossed the stop."""
+    if order.order_type.buy:
+      return close_price <= stop_loss
+    return close_price >= stop_loss
 
   def send_close_order_command(self, ticket: int, lots: float = 0) -> None:
     """Close a specific order using the latest available quote."""

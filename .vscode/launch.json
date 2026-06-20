@@ -17,20 +17,21 @@
         "--start-date",
         "${input:SimulatorStartDate}",
         "--finish-date",
-        "${input:SimulatorFinishDate}",
+        "${input:SimulatorFinishDate}"
       ],
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}"
     },
     {
-      "name": "Makefile run_forex",
+      "name": "Forex",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/.env",
+      "python": "/home/pisorul/.cache/pypoetry/virtualenvs/sorul-tradingbot-hpqtalII-py3.11/bin/python",
+      "program": "${workspaceFolder}/sorul_tradingbot/main_forex.py",
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
-      "preLaunchTask": "make run_forex"
-    },
+      "envFile": "${workspaceFolder}/.env"
+    }
   ],
   "inputs": [
     {
@@ -62,6 +63,6 @@
       "type": "promptString",
       "description": "Optional date (YYYY-MM-DD) to run the simulation up to (inclusive). Leave empty to use all data.",
       "default": "2050-12-01"
-    },
+    }
   ]
 }
