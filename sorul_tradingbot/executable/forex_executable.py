@@ -78,19 +78,7 @@ class ForexExecutable(Executable):
     # Avoid opening new entries with stale closed-trade history. The viability
     # checks rely on historical_trades to know whether the strategy already
     # traded today.
-    if not mt_client.ensure_historical_trades_current(
-        timeout_seconds=10,
-        max_age_seconds=120,
-        lookback_days=2,
-    ):
-      log.warning('Skipping new entries because historical trades are stale')
-      self.finish(mt_client)
-
-      increment_consecutive_times_down()
-      ctd = get_consecutive_times_down()
-      if ctd > 25:
-        self._reboot_mt()
-        reset_consecutive_times_down()
+    if self._historical_trades_are_stale(mt_client):
       return
 
     # Send commands to obtain the historical data
@@ -129,15 +117,33 @@ class ForexExecutable(Executable):
     else:
       log.debug(message)
 
+  def _historical_trades_are_stale(self, mt_client: MT_Client) -> bool:
+    if mt_client.ensure_historical_trades_current(
+        timeout_seconds=10,
+        max_age_seconds=120,
+        lookback_days=2,
+    ):
+      return False
+
+    log.warning('Skipping new entries because historical trades are stale')
+    self.finish(mt_client)
+
+    increment_consecutive_times_down()
+    ctd = get_consecutive_times_down()
+    if ctd > 25:
+      self._reboot_mt()
+      reset_consecutive_times_down()
+    return True
+
   def handle_new_historical_data(self, mt_client: MT_Client,
                                  utc_date: datetime,
                                  execution_time: timedelta) -> None:
     """Handle the new historical data."""
     # The execution will take up to 4 minutes
     stop_condition = utc_date - execution_time + timedelta(minutes=4)
-    timeout_seconds = max(0.0,
-                          (stop_condition -
-                           datetime.now(Config.utc_timezone)).total_seconds())
+    timeout_seconds = max(0.0, (
+        stop_condition - datetime.now(Config.utc_timezone)
+    ).total_seconds())
 
     remaining_symbols = mt_client.wait_historical_data(
         symbols=Config.symbols,

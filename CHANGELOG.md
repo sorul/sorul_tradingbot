@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## v0.4.1 (2026/06/20)
+- fix:
+  - Align simulator break-even placement with the MetaTrader client by moving stops one pip beyond entry and closing immediately when the new stop is already crossed.
+  - Increase the historical-trades freshness timeout in the forex executable and trigger the MetaTrader reboot recovery path when stale data persists.
+- refactor:
+  - Simplify forex executable time calculations and subprocess calls.
+  - Update VS Code launch configurations for simulator and forex execution.
+- chore:
+  - Update runtime and development dependencies, including `tornado`.
+  - Ignore local `.atl/` configuration files.
+
 ## v0.4.0 (2026/05/10)
 - feat:
   - Configure `MT_Client` pollers explicitly for the forex executable.
