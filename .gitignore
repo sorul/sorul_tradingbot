@@ -173,3 +173,4 @@ sorul_tradingbot/strategy/simulator/outputs/*
 !sorul_tradingbot/strategy/simulator/data/.gitkeep
 !sorul_tradingbot/strategy/simulator/data/sp500_test.csv
 !sorul_tradingbot/strategy/simulator/outputs/.gitkeep
+.atl/
