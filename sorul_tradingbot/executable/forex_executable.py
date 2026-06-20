@@ -68,11 +68,9 @@ class ForexExecutable(Executable):
     local_date = datetime.now(Config.local_timezone)
 
     # The instant of time that executed this main
-    execution_time = timedelta(
-        minutes=utc_date.minute % 5,
-        seconds=utc_date.second,
-        microseconds=utc_date.microsecond
-    )
+    execution_time = timedelta(minutes=utc_date.minute % 5,
+                               seconds=utc_date.second,
+                               microseconds=utc_date.microsecond)
 
     # Send profit message
     self._send_profit_message(mt_client, local_date)
@@ -81,12 +79,18 @@ class ForexExecutable(Executable):
     # checks rely on historical_trades to know whether the strategy already
     # traded today.
     if not mt_client.ensure_historical_trades_current(
-        timeout_seconds=5,
+        timeout_seconds=10,
         max_age_seconds=120,
         lookback_days=2,
     ):
       log.warning('Skipping new entries because historical trades are stale')
       self.finish(mt_client)
+
+      increment_consecutive_times_down()
+      ctd = get_consecutive_times_down()
+      if ctd > 25:
+        self._reboot_mt()
+        reset_consecutive_times_down()
       return
 
     # Send commands to obtain the historical data
@@ -125,19 +129,15 @@ class ForexExecutable(Executable):
     else:
       log.debug(message)
 
-  def handle_new_historical_data(
-          self,
-          mt_client: MT_Client,
-          utc_date: datetime,
-          execution_time: timedelta
-  ) -> None:
+  def handle_new_historical_data(self, mt_client: MT_Client,
+                                 utc_date: datetime,
+                                 execution_time: timedelta) -> None:
     """Handle the new historical data."""
     # The execution will take up to 4 minutes
     stop_condition = utc_date - execution_time + timedelta(minutes=4)
-    timeout_seconds = max(
-        0.0,
-        (stop_condition - datetime.now(Config.utc_timezone)).total_seconds()
-    )
+    timeout_seconds = max(0.0,
+                          (stop_condition -
+                           datetime.now(Config.utc_timezone)).total_seconds())
 
     remaining_symbols = mt_client.wait_historical_data(
         symbols=Config.symbols,
@@ -151,8 +151,8 @@ class ForexExecutable(Executable):
       # Check if MT needs to restart
       self._check_mt_needs_to_restart(len(remaining_symbols))
 
-  def _send_profit_message(
-          self, mt_client: MT_Client, local_date: datetime) -> bool:
+  def _send_profit_message(self, mt_client: MT_Client,
+                           local_date: datetime) -> bool:
     """Get the balance of the account."""
     balance = mt_client.get_balance()
     last_balance = get_last_balance()
@@ -180,15 +180,9 @@ class ForexExecutable(Executable):
   def _reboot_mt(self) -> None:
     log.warning('Rebooting MetaTrader ...')
 
-    subprocess.run(
-        ['make', 'stop_docker'],
-        capture_output=True, text=True
-    )
+    subprocess.run(['make', 'stop_docker'], capture_output=True, text=True)
     sleep(10)
-    subprocess.run(
-        ['make', 'start_docker'],
-        capture_output=True, text=True
-    )
+    subprocess.run(['make', 'start_docker'], capture_output=True, text=True)
 
     sleep(180)
 
