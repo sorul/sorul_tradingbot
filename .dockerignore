@@ -1,0 +1,4 @@
+metatrader/*
+!metatrader/docker_mt5_start.sh
+!metatrader/root/
+!metatrader/root/**
