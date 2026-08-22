@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## v0.4.2 (2026/08/22)
+- fix:
+  - Harden MetaTrader startup against LiveUpdate/Wine failures.
+  - Update runtime and development dependencies to address active security vulnerabilities.
+- chore:
+  - Add Dependabot configuration for weekly Python dependency update pull requests.
+
 ## v0.4.1 (2026/06/20)
 - fix:
   - Align simulator break-even placement with the MetaTrader client by moving stops one pip beyond entry and closing immediately when the new stop is already crossed.

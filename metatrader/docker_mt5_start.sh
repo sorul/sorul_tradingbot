@@ -66,7 +66,24 @@ fi
 if [ -e "$mt5file" ]; then
     show_message "[4/4] File $mt5file is installed. Running MT5..."
     chmod -R 777 "/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts/Advisors"
-    $wine_executable "$mt5file" &
+
+    while true; do
+        if pgrep -f "terminal64\\.exe" >/dev/null 2>&1; then
+            sleep 30
+            continue
+        fi
+
+        show_message "MT5 is not running. Clearing LiveUpdate cache and starting it..."
+        find "$WINEPREFIX/drive_c/users/abc/AppData/Roaming/MetaQuotes/Terminal" \
+          -path "*/liveupdate/*" -type f -print -delete 2>/dev/null || true
+
+        # Prevent MetaTrader LiveUpdate from replacing the known-working build with
+        # a newer terminal that may require a newer Wine than this ARM host can run.
+        $wine_executable "$mt5file" "/skipupdate" &
+
+        # Give Wine/MT5 enough time to initialize before checking again.
+        sleep 30
+    done
 else
     show_message "[4/4] File $mt5file is not installed. MT5 cannot be run."
 fi
