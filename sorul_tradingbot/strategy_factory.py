@@ -23,6 +23,7 @@ def strategy_factory(
   from sorul_tradingbot.strategy.private.volume_17 import Volume as Volume17
   from sorul_tradingbot.strategy.private.volume_18 import Volume as Volume18
   from sorul_tradingbot.strategy.private.volume_19 import Volume as Volume19
+  from sorul_tradingbot.strategy.private.volume_20 import Volume as Volume20
 
   for s in [
       TNT(mt_client),
@@ -38,6 +39,7 @@ def strategy_factory(
       Volume17(mt_client),
       Volume18(mt_client),
       Volume19(mt_client),
+      Volume20(mt_client),
   ]:
     if s.strategy_name in strategy_name or strategy_name in s.strategy_name:
       return s
