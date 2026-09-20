@@ -12,6 +12,8 @@
         "${input:SimulatorDataFile}",
         "--strategy-module",
         "${input:SimulatorStrategyModule}",
+        "--strategy-class",
+        "${input:SimulatorStrategyClass}",
         "--description",
         "${input:SimulatorDescription}",
         "--start-date",
@@ -38,13 +40,19 @@
       "id": "SimulatorDataFile",
       "type": "promptString",
       "description": "Ruta al CSV a usar en el simulador",
-      "default": "sorul_tradingbot/strategy/simulator/data/sp500_test.csv"
+      "default": "sorul_tradingbot/strategy/simulator/data/sp500_2025.csv"
     },
     {
       "id": "SimulatorStrategyModule",
       "type": "promptString",
-      "description": "Ruta del módulo de estrategia (p.ej. sorul_tradingbot.strategy.private.volume_12)",
-      "default": "sorul_tradingbot.strategy.private.volume_12"
+      "description": "Ruta del módulo de estrategia (p.ej. sorul_tradingbot.strategy.private.volume_20)",
+      "default": "sorul_tradingbot.strategy.private.volume_20"
+    },
+    {
+      "id": "SimulatorStrategyClass",
+      "type": "promptString",
+      "description": "Nombre de la clase de estrategia (p.ej. Volume o PivotTrend)",
+      "default": "Volume"
     },
     {
       "id": "SimulatorDescription",
@@ -55,14 +63,14 @@
     {
       "id": "SimulatorStartDate",
       "type": "promptString",
-      "description": "Optional date (YYYY-MM-DD) to run the simulation up to (inclusive). Leave empty to use all data.",
-      "default": "2024-12-01"
+      "description": "Optional date (YYYY-MM-DD) to start the simulation from (inclusive). Leave empty to use all data.",
+      "default": "2025-01-01"
     },
     {
       "id": "SimulatorFinishDate",
       "type": "promptString",
       "description": "Optional date (YYYY-MM-DD) to run the simulation up to (inclusive). Leave empty to use all data.",
-      "default": "2050-12-01"
+      "default": "2025-02-01"
     }
   ]
 }
