@@ -14,9 +14,9 @@ Only first time is required to install tonistiigi/binfmt image before run the do
 docker run --privileged --rm tonistiigi/binfmt --install all
 ```
 
-Run "make run_docker" to activate MetaTrader.
+Run "make start_docker" to activate MetaTrader.
 If a connection error occurs on Debian repository packages, 
-run the "make run_docker" command again. If a permission error occurs,
+run the "make start_docker" command again. If a permission error occurs,
 use "sudo chmod -R 777" to metatrader folder.
 
 Once it's available, access it through the browser at [localhost:3000](http://localhost:3000).
