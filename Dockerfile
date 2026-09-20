@@ -23,10 +23,16 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Upgrade pip within the virtual environment
 RUN pip install --upgrade pip
 
-# Install Wine64 and its dependencies. The base image runs natively on the host;
-# only the amd64 Wine/MetaTrader processes are emulated via binfmt/qemu.
-RUN dpkg --add-architecture amd64 && apt-get update && \
-    apt-get install -y wine64:amd64 libwine:amd64
+# Install Wine's 64-bit and 32-bit runtimes. The base image runs natively on
+# the host; Wine/MetaTrader processes are emulated via binfmt/qemu.
+RUN dpkg --add-architecture amd64 && \
+    dpkg --add-architecture i386 && \
+    apt-get update && \
+    apt-get install -y \
+      wine64:amd64 \
+      libwine:amd64 \
+      wine32:i386 \
+      libwine:i386
 
 # Create the Wine directory. The actual Wine prefix lives on the /config volume
 # and is initialized at runtime by docker_mt5_start.sh.
