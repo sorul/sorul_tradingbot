@@ -31,13 +31,19 @@ Completed-close excursion analysis found that about half of eventual losing trad
 ## Delivery
 - Forecast: under 400 authored lines.
 - Strategy: ask-on-risk.
+- Implementation: `22333c7 feat(strategy): add pivot trend break-even`.
+- Corrections: `0de96be fix(strategy): prune pending break-even atr state` and
+  `77aab14 fix(strategy): retain cross-symbol pending atr state`.
 
 ## Progress
-- `poetry run pytest tests/test_pivot_trend.py sorul_tradingbot/strategy/private/test_pivot_trend.py -q` — 43 passed in 1.00s.
-- Commit pending: this delegated environment cannot create `.git/index.lock` because `.git` is read-only. The user-owned `pivot_trend.ipynb` remains unmodified by this task.
+- `poetry run pytest tests/test_pivot_trend.py -q` — 8 passed in 0.62s during final independent verification.
+- The user-owned `pivot_trend.ipynb` remains unmodified by this task.
 - Follow-up correction: prune ATR records keyed by magic when their order is no
   longer present in the strategy's open-order view. This preserves delayed fills
   that remain visible as open orders while removing rejected/absent records.
+- Cross-symbol correction: pending ATR pruning gathers this strategy's order
+  magics across every symbol, so processing one symbol does not erase another
+  still-visible pending order.
 - Follow-up correction: determine pending-order magic retention across every
   symbol owned by this strategy, so processing one symbol cannot erase another
   symbol's delayed-fill ATR record.
