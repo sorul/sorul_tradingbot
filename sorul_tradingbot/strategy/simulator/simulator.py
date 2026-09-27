@@ -15,7 +15,6 @@ from unittest.mock import patch
 
 import pandas as pd
 from tqdm import tqdm
-import yfinance as yf
 import tradeo
 import tradeo.utils as tradeo_utils
 import tradeo.strategies.strategy as tradeo_strategy
@@ -33,7 +32,7 @@ logging.getLogger('tradeo').setLevel(logging.WARNING)
 logging.getLogger().setLevel(logging.WARNING)  # si usan el root
 
 LOGGER = logging.getLogger(__name__)
-PNL_BREAK_EVEN_THRESHOLD = 0.01
+PNL_BREAK_EVEN_THRESHOLD = 0.1
 
 
 def _create_magic_number_for_datetime(now: datetime) -> str:
@@ -105,6 +104,10 @@ class ActiveOrder:
   order: Order
   entry_time: datetime
   entry_price: float
+  initial_take_profit: float
+  initial_stop_loss: float
+  max_adverse_excursion: float = 0.0
+  max_favorable_excursion: float = 0.0
 
 
 @dataclass
@@ -115,8 +118,19 @@ class ExecutedOrder:
   exit_time: datetime
   entry_price: float
   exit_price: float
+  initial_take_profit: float
+  initial_stop_loss: float
+  max_adverse_excursion: float
+  max_favorable_excursion: float
   result: str
   pnl: float
+
+  @property
+  def initial_reward_risk(self) -> float:
+    """Return the reward/risk ratio from the original TP and SL."""
+    reward = abs(self.initial_take_profit - self.entry_price)
+    risk = abs(self.entry_price - self.initial_stop_loss)
+    return reward / risk if risk else float('inf')
 
   @property
   def ticket(self) -> int:
@@ -211,6 +225,8 @@ class SimulatedMTClient:
         order=order,
         entry_time=self._now,
         entry_price=entry_price,
+        initial_take_profit=order.take_profit,
+        initial_stop_loss=order.stop_loss,
     )
     LOGGER.info(
         'Order opened ticket=%s side=%s entry=%.2f tp=%.2f sl=%.2f',
@@ -222,12 +238,13 @@ class SimulatedMTClient:
     )
 
   def evaluate_positions(self, bar: pd.Series, now: datetime) -> None:
-    """Check if any active order hits TP or SL within the provided bar."""
+    """Resolve active positions against a bar after its open was processed."""
     to_close: List[Tuple[Order, float, str]] = []
     high, low = float(bar.high), float(bar.low)
     for _, meta in list(self._active_orders.items()):
       order = meta.order
       is_buy = order.order_type.buy
+      self._update_excursions(meta, high, low, is_buy)
       tp_hit, sl_hit = self._check_hits(order, high, low, is_buy)
       exit_price: Optional[float] = None
       result: Optional[str] = None
@@ -250,6 +267,27 @@ class SimulatedMTClient:
     for order, exit_price, result in to_close:
       self._close_order(order, exit_price, now, result)
 
+  @staticmethod
+  def _update_excursions(
+      active: ActiveOrder,
+      high: float,
+      low: float,
+      is_buy: bool,
+  ) -> None:
+    """Track maximum favorable and adverse movement while an order is open."""
+    if is_buy:
+      favorable = high - active.entry_price
+      adverse = active.entry_price - low
+    else:
+      favorable = active.entry_price - low
+      adverse = high - active.entry_price
+    active.max_favorable_excursion = max(
+        active.max_favorable_excursion, favorable, 0.0
+    )
+    active.max_adverse_excursion = max(
+        active.max_adverse_excursion, adverse, 0.0
+    )
+
   def set_market_snapshot(self, symbol: str, bid: float, ask: float) -> None:
     """Persist the latest bid/ask quote for downstream strategy hooks."""
     self._market_prices[symbol] = (bid, ask)
@@ -257,6 +295,30 @@ class SimulatedMTClient:
   def get_bid_ask(self, symbol: str) -> Tuple[float, float]:
     """Expose the last known bid/ask quote for a symbol."""
     return self._market_prices.get(symbol, (0.0, 0.0))
+
+  def evaluate_open_gaps(self, bar: pd.Series, now: datetime) -> None:
+    """Resolve stops and targets already crossed at the executable bar open."""
+    open_price = float(bar.open)
+    to_close: List[Tuple[Order, float, str]] = []
+    for _, meta in list(self._active_orders.items()):
+      order = meta.order
+      is_buy = order.order_type.buy
+      tp_hit, sl_hit = self._check_hits(
+          order, open_price, open_price, is_buy
+      )
+      if not tp_hit and not sl_hit:
+        continue
+      self._update_excursions(meta, open_price, open_price, is_buy)
+      # A malformed order could have both prices crossed at the open. Since
+      # OHLC has no path information, preserve capital and resolve the stop.
+      result = 'stop_loss' if sl_hit else 'take_profit'
+      to_close.append((order, open_price, result))
+    for order, exit_price, result in to_close:
+      self._close_order(order, exit_price, now, result)
+
+  def is_order_active(self, order: Order) -> bool:
+    """Return whether an order remains open after a strategy callback."""
+    return order.ticket in self._active_orders
 
   def _check_hits(
       self,
@@ -281,13 +343,8 @@ class SimulatedMTClient:
       order: Order,
       is_buy: bool,
   ) -> Tuple[float, str]:
-    """Break ties when TP and SL are reached within same bar."""
-    distance_tp = abs(order.take_profit - entry_price)
-    distance_sl = abs(entry_price - order.stop_loss)
-    if distance_tp <= distance_sl:
-      return order.take_profit, 'take_profit'
-    if is_buy:
-      return order.stop_loss, 'stop_loss'
+    """Resolve an unknowable intrabar collision conservatively at the stop."""
+    del entry_price, is_buy
     return order.stop_loss, 'stop_loss'
 
   def _close_order(
@@ -310,6 +367,10 @@ class SimulatedMTClient:
         exit_time=exit_time,
         entry_price=active.entry_price,
         exit_price=exit_price,
+        initial_take_profit=active.initial_take_profit,
+        initial_stop_loss=active.initial_stop_loss,
+        max_adverse_excursion=active.max_adverse_excursion,
+        max_favorable_excursion=active.max_favorable_excursion,
         result=result,
         pnl=pnl,
     )
@@ -514,15 +575,16 @@ class StrategySimulator:
       row: pd.Series,
   ) -> None:
     now = timestamp.to_pydatetime()  # type: ignore[union-attr]
-    close_price = float(row.close)
+    open_price = float(row.open)
     self.mt_client.set_now(now)
-    self.mt_client.set_market_snapshot(self.symbol, close_price, close_price)
-    self.mt_client.evaluate_positions(row, now)
-    self._handle_open_orders()
-    window = self._build_window(idx, timestamp)
+    self.mt_client.set_market_snapshot(self.symbol, open_price, open_price)
+    self.mt_client.evaluate_open_gaps(row, now)
+    window = self._build_causal_window(idx, timestamp, row)
     ohlc = OHLC(window, volume_column_name='volume')
     self._capture_levels(ohlc, now)
-    self._maybe_create_order(ohlc, now, close_price)
+    self._handle_open_orders()
+    self._maybe_create_order(ohlc, now, open_price)
+    self.mt_client.evaluate_positions(row, now)
 
   def _handle_open_orders(self) -> None:
     # Manage any still-open orders before generating new ones.
@@ -530,25 +592,34 @@ class StrategySimulator:
       return
     with _patch_strategy_datetime(self.strategy, self.mt_client.current_time):
       for order in list(self.mt_client.open_orders):
+        if not self.mt_client.is_order_active(order):
+          continue
         if order.order_type.pending:
           self.strategy.handle_pending_orders(order)
         elif order.order_type.market:
           self.strategy.handle_filled_orders(order)
 
-  def _build_window(self, idx: int, timestamp: pd.Timestamp) -> pd.DataFrame:
-    end_ts = pd.Timestamp(timestamp)
-    start_ts = end_ts - pd.Timedelta(days=self._lookback_days)
-    # Limit to a fixed trailing window to keep compute bounded.
-    window = self.data.loc[start_ts:end_ts]
-    if window.empty:
-      return self.data.iloc[:idx]
-    return window
+  def _build_causal_window(
+      self,
+      idx: int,
+      timestamp: pd.Timestamp,
+      row: pd.Series,
+  ) -> pd.DataFrame:
+    """Return closed history plus the current bar with only its open known."""
+    start_ts = pd.Timestamp(timestamp) - pd.Timedelta(days=self._lookback_days)
+    history = self.data.iloc[: idx - 1].loc[start_ts:timestamp]
+    opening_row = row.copy()
+    for column in ('high', 'low', 'close'):
+      opening_row[column] = opening_row['open']
+    return pd.concat(
+        [history, pd.DataFrame([opening_row], index=[timestamp])],
+    )
 
   def _maybe_create_order(
       self,
       ohlc: OHLC,
       now: datetime,
-      close_price: float,
+      market_entry_price: float,
   ) -> None:
     with _patch_magic_number(self.strategy, now):
       possible_order = self.strategy.indicator(ohlc, self.symbol, now)
@@ -556,9 +627,9 @@ class StrategySimulator:
       return
     if not self.strategy.check_order_viability(possible_order, date=now):
       return
-    if possible_order.order_type.market and not possible_order.price:
+    if possible_order.order_type.market:
       price_details = possible_order._mutable_details._prices  # type: ignore[attr-defined]  # noqa: E501
-      price_details.price = close_price
+      price_details.price = market_entry_price
     self.mt_client.create_new_order(possible_order)
 
 
@@ -652,16 +723,11 @@ def _summarize(
   losses = sum(1 for trade in trades if trade.pnl < -PNL_BREAK_EVEN_THRESHOLD)
   break_evens = len(trades) - wins - losses
   net = sum(trade.pnl for trade in trades)
-  if symbol.upper() == 'SP500':
-    try:
-      net = _convert_sp500_net_to_eur(trades)
-    except (ValueError, KeyError, TypeError) as exc:
-      LOGGER.warning('Could not convert SP500 net to EUR: %s', exc)
   summary = (
       f'Input file: {data_file_str} | Trades: {len(trades)} | '
       f'Wins: {wins} | Losses: {losses} | Break even: {break_evens} | '
       f'Ratio: {wins / (wins + losses) if wins + losses else 0:.2f} | '
-      f'Net: {net:.2f} EUR'
+      f'Net: {net:.2f} points'
   )
   print(summary)  # noqa: T201
   return summary
@@ -697,52 +763,12 @@ def _build_simulation_summary_payload(
   return '\n'.join(lines)
 
 
-def _convert_sp500_net_to_eur(trades: Iterable[ExecutedOrder]) -> float:
-  """Convert SP500 PnL (assumed USD) into EUR using yearly EUR/USD averages."""
-  yearly_rates: dict[int, float] = {}
-  total_eur = 0.0
-  for trade in trades:
-    exit_time = trade.exit_time
-    year = exit_time.year
-    rate = yearly_rates.get(year)
-    if rate is None:
-      rate = _fetch_average_eurusd_rate(year)
-      yearly_rates[year] = rate
-    total_eur += float(trade.pnl / rate)
-  return total_eur
-
-
-def _fetch_average_eurusd_rate(year: int) -> float:
-  """Fetch the average EUR/USD close price for a given year."""
-  start = datetime(year, 1, 1)
-  end = datetime(year + 1, 1, 1)
-  data = yf.download(
-      'EURUSD=X',
-      start=start,
-      end=end,
-      progress=False,
-      auto_adjust=False,
-  )
-  closes = data.get('Close')  # type: ignore
-  if closes is None:
-    raise ValueError('No Close column found in EURUSD data.')
-  closes = closes.dropna()
-  if closes.empty:
-    raise ValueError(f'No EUR/USD data available for year {year}.')
-  mean_value = closes.mean()
-  if isinstance(mean_value, pd.Series):
-    if mean_value.empty:
-      raise ValueError(f'No EUR/USD data available for year {year}.')
-    mean_value = mean_value.iloc[0]
-  return float(mean_value)
-
-
 def _load_data(
     csv_path: Path,
     start_date: Optional[pd.Timestamp] = None,
     finish_date: Optional[pd.Timestamp] = None,
 ) -> pd.DataFrame:
-  df = pd.read_csv(csv_path, parse_dates=['datetime'])
+  df = pd.read_csv(csv_path, parse_dates=['datetime'], sep=';')
   df = df.set_index('datetime').sort_index()
   df = df[['open', 'high', 'low', 'close', 'volume']]
   if start_date is not None:
@@ -754,7 +780,8 @@ def _load_data(
       )
   if finish_date is not None:
     finish_ts = _normalize_index_timestamp(df, pd.Timestamp(finish_date))
-    df = df[df.index <= finish_ts]
+    finish_exclusive = finish_ts + pd.DateOffset(days=1)
+    df = df[df.index < finish_exclusive]
     if df.empty:
       raise ValueError(
           f'No candles before the requested finish date {finish_ts.date()}.'
@@ -1023,6 +1050,11 @@ def _orders_to_dataframe(
             'exit_time': trade.exit_time,
             'entry_price': trade.entry_price,
             'exit_price': trade.exit_price,
+            'initial_take_profit': trade.initial_take_profit,
+            'initial_stop_loss': trade.initial_stop_loss,
+            'initial_reward_risk': trade.initial_reward_risk,
+            'max_adverse_excursion': trade.max_adverse_excursion,
+            'max_favorable_excursion': trade.max_favorable_excursion,
             'take_profit': order.take_profit,
             'stop_loss': order.stop_loss,
             'result': trade.result,
@@ -1042,6 +1074,16 @@ def _orders_to_dataframe(
             'comment': order.comment,
             'entry_time': active.entry_time,
             'entry_price': active.entry_price,
+            'initial_take_profit': active.initial_take_profit,
+            'initial_stop_loss': active.initial_stop_loss,
+            'initial_reward_risk': (
+                abs(active.initial_take_profit - active.entry_price)
+                / abs(active.entry_price - active.initial_stop_loss)
+                if active.entry_price != active.initial_stop_loss
+                else float('inf')
+            ),
+            'max_adverse_excursion': active.max_adverse_excursion,
+            'max_favorable_excursion': active.max_favorable_excursion,
             'take_profit': order.take_profit,
             'stop_loss': order.stop_loss,
         }

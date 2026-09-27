@@ -13,6 +13,8 @@ services:
     volumes:
       - ./metatrader:/config
     environment:
+      - PUID=1000
+      - PGID=1000
       - MT_BACKGROUND=false # There is no difference in terms of performance
     ports:
       - 3000:3000
