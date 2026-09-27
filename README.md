@@ -30,7 +30,7 @@ The usual thing is that the folder is located in two possible locations:
     - drive_c/users/abc/AppData/Roaming/MetaQuotes/Terminal/\<hexadecimal code>
 4) Download [mt_tb_expert.ex5](https://github.com/sorul/tradeo/raw/refs/heads/master/docs/files/mt_tb_expert.ex5)
 file. This expert is used by the Tradeo library to communicate with MetaTrader; it does not execute trades on its own unless instructed by the user.  Put the file in the proper directory: \<data folder>/MQL5/Experts/Advisors/mt_tb_expert.ex5
-5) Activate the "Algo Trading" button at the top of MetaTrader.
+5) Activate the "Algo Trading" button at the top of MetaTrader. Make sure, in the "Experts" tab below, that "automated trading is enabled" message is displayed.
 6) Double click in the expert to activate it in any symbol chart (e.g. USCAD, M5), it does not matter which chart you use. But only in one of them.
 
 ![TradingBot Image](docs/img/mt5_readme.png)
