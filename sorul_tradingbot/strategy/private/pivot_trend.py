@@ -59,16 +59,16 @@ class PivotTrend(Strategy):
     self._broken_pivots: dict[tuple[str, bool], datetime] = {}
     self._stop_pivots: dict[str, datetime] = {}
     self._requested_stops: dict[int, float] = {}
+    self._entry_atrs_by_magic: dict[str, float] = {}
+    self._entry_atrs: dict[int, float] = {}
+    self._break_even_tickets: set[int] = set()
 
   def indicator(
       self, ohlc: OHLC, symbol: str, now_date: datetime,
   ) -> Optional[Order]:
     """Manage stops and return at most one signal per symbol and new bar."""
     _ = now_date
-    # The current row is open-only, so 48 earlier completed bars need 50 rows.
-    warmup = max(
-        self.pivot_left + self.pivot_right + 1, self.atr_period + 1, 49,
-    )
+    warmup = max(self.pivot_left + self.pivot_right + 1, self.atr_period + 1)
     if len(ohlc) < warmup + 1:
       return None
     bar = ohlc.datetime[-1]
@@ -91,17 +91,13 @@ class PivotTrend(Strategy):
     maxima = self._pivots(highs, 'max')
     minima = self._pivots(lows, 'min')
     self._trail_orders(symbol, entry, atr, maxima, minima, ohlc.datetime[:-1])
+    self._place_break_even_orders(symbol, float(closes[-1]))
     if len(maxima) < 2 or len(minima) < 2:
       return None
     bullish = maxima[0][0] > maxima[1][0] and minima[0][0] > minima[1][0]
     bearish = maxima[0][0] < maxima[1][0] and minima[0][0] < minima[1][0]
     buy = bullish and closes[-2] <= maxima[0][0] < closes[-1]
     sell = bearish and closes[-2] >= minima[0][0] > closes[-1]
-    if not (buy or sell):
-      return None
-    prior_trend = closes[-1] - closes[-49]
-    buy = bool(buy and prior_trend > 0)
-    sell = bool(sell and prior_trend < 0)
     if not (buy or sell):
       return None
     buy = bool(buy)
@@ -117,7 +113,7 @@ class PivotTrend(Strategy):
     if not self._valid_stop(entry, stop, buy) or self._own_orders(symbol):
       return None
     self._stop_pivots[symbol] = ohlc.datetime[:-1][opposing[1]]
-    return Order(
+    order = Order(
         MutableOrderDetails(OrderPrice(price=entry, stop_loss=float(stop)),
                             lots=self.lots),
         ImmutableOrderDetails(
@@ -125,6 +121,8 @@ class PivotTrend(Strategy):
             magic=create_magic_number(), comment=self.strategy_name,
         ),
     )
+    self._entry_atrs_by_magic[order.magic] = atr
+    return order
 
   def _pivots(self, prices: np.ndarray, kind: str) -> list:
     """Return the two latest fully confirmed pivots, most recent first."""
@@ -154,6 +152,11 @@ class PivotTrend(Strategy):
         ticket: stop for ticket, stop in self._requested_stops.items()
         if ticket in active_tickets
     }
+    self._entry_atrs = {
+        ticket: atr for ticket, atr in self._entry_atrs.items()
+        if ticket in active_tickets
+    }
+    self._break_even_tickets.intersection_update(active_tickets)
     for order in self._own_orders(symbol):
       if not order.order_type.market:
         continue
@@ -176,6 +179,34 @@ class PivotTrend(Strategy):
       if improves and self._valid_stop(entry, stop, buy):
         self._modify_stop(order, stop)
         self._requested_stops[order.ticket] = stop
+
+  def _place_break_even_orders(self, symbol: str, close: float) -> None:
+    """Move eligible positions to entry after a completed favourable close."""
+    if not np.isfinite(close):
+      return
+    for order in self._own_orders(symbol):
+      if not order.order_type.market or order.ticket in self._break_even_tickets:
+        continue
+      entry_atr = self._entry_atrs.get(order.ticket)
+      if entry_atr is None or not np.isfinite(entry_atr) or entry_atr <= 0:
+        continue
+      buy = order.order_type.buy
+      moved_favourably = (
+          close >= order.price + entry_atr if buy
+          else close <= order.price - entry_atr
+      )
+      if not moved_favourably:
+        continue
+      previous = self._requested_stops.get(order.ticket, order.stop_loss)
+      previous = max(previous, order.stop_loss) if buy else min(
+          previous, order.stop_loss,
+      )
+      stop = float(order.price)
+      improves = stop > previous if buy else stop < previous
+      if improves:
+        self._modify_stop(order, stop)
+        self._requested_stops[order.ticket] = stop
+      self._break_even_tickets.add(order.ticket)
 
   def _modify_stop(self, order: Order, stop: float) -> None:
     """Use broker commands live and the simulator's mutable order storage."""
@@ -207,5 +238,8 @@ class PivotTrend(Strategy):
                                  order.order_type.buy))
 
   def handle_filled_orders(self, order: Order, **kwargs) -> None:
-    """Leave management to indicator, where closed-candle structure exists."""
-    _ = order, kwargs
+    """Associate a filled order with the ATR used when its signal was made."""
+    _ = kwargs
+    entry_atr = self._entry_atrs_by_magic.pop(order.magic, None)
+    if entry_atr is not None:
+      self._entry_atrs[order.ticket] = entry_atr
