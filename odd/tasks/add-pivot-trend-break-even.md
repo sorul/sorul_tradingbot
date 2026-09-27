@@ -35,3 +35,6 @@ Completed-close excursion analysis found that about half of eventual losing trad
 ## Progress
 - `poetry run pytest tests/test_pivot_trend.py sorul_tradingbot/strategy/private/test_pivot_trend.py -q` — 43 passed in 1.00s.
 - Commit pending: this delegated environment cannot create `.git/index.lock` because `.git` is read-only. The user-owned `pivot_trend.ipynb` remains unmodified by this task.
+- Follow-up correction: prune ATR records keyed by magic when their order is no
+  longer present in the strategy's open-order view. This preserves delayed fills
+  that remain visible as open orders while removing rejected/absent records.

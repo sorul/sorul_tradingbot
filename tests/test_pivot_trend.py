@@ -93,6 +93,19 @@ def test_break_even_ignores_early_or_current_open_only_movement(buy):
   assert order.stop_loss == initial_stop
 
 
+def test_unfilled_order_atr_is_pruned_when_its_order_is_absent():
+  strategy = _strategy_with_pivots([], [])
+  strategy._entry_atrs_by_magic['unfilled-order'] = 2.5
+  ohlc = _ohlc(
+      closed_start=100.0, closed_penultimate=105.0, closed_last=111.0,
+      entry=110.0, current_close=110.0,
+  )
+
+  strategy.indicator(ohlc, 'SP500', ohlc.datetime[-1])
+
+  assert strategy._entry_atrs_by_magic == {}
+
+
 @pytest.mark.parametrize(
     ('side', 'closed_start', 'closed_penultimate', 'closed_last', 'entry',
      'current_close', 'maxima', 'minima'),
