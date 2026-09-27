@@ -157,7 +157,10 @@ class PivotTrend(Strategy):
         if ticket in active_tickets
     }
     self._break_even_tickets.intersection_update(active_tickets)
-    active_magics = {order.magic for order in self._own_orders(symbol)}
+    active_magics = {
+        order.magic for order in self.mt_client.open_orders
+        if order.comment == self.strategy_name
+    }
     self._entry_atrs_by_magic = {
         magic: atr for magic, atr in self._entry_atrs_by_magic.items()
         if magic in active_magics

@@ -38,3 +38,6 @@ Completed-close excursion analysis found that about half of eventual losing trad
 - Follow-up correction: prune ATR records keyed by magic when their order is no
   longer present in the strategy's open-order view. This preserves delayed fills
   that remain visible as open orders while removing rejected/absent records.
+- Follow-up correction: determine pending-order magic retention across every
+  symbol owned by this strategy, so processing one symbol cannot erase another
+  symbol's delayed-fill ATR record.

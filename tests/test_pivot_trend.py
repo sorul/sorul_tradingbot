@@ -106,6 +106,25 @@ def test_unfilled_order_atr_is_pruned_when_its_order_is_absent():
   assert strategy._entry_atrs_by_magic == {}
 
 
+def test_pending_order_atr_is_retained_while_another_symbol_is_processed():
+  pending = SimpleNamespace(
+      ticket=1,
+      magic='pending-other-symbol',
+      comment='PivotTrend v0.1',
+      symbol='NAS100',
+  )
+  strategy = PivotTrend(SimpleNamespace(open_orders=[pending]))
+  strategy._entry_atrs_by_magic[pending.magic] = 2.5
+  ohlc = _ohlc(
+      closed_start=100.0, closed_penultimate=105.0, closed_last=111.0,
+      entry=110.0, current_close=110.0,
+  )
+
+  strategy.indicator(ohlc, 'SP500', ohlc.datetime[-1])
+
+  assert strategy._entry_atrs_by_magic == {pending.magic: 2.5}
+
+
 @pytest.mark.parametrize(
     ('side', 'closed_start', 'closed_penultimate', 'closed_last', 'entry',
      'current_close', 'maxima', 'minima'),
