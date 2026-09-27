@@ -35,6 +35,7 @@ The four current analysis cells depend on notebook state, use inconsistent metri
 - Forecast: under 400 authored lines.
 - Strategy: ask-on-risk.
 - Work unit: notebook cleanup and reproducible execution validation.
+- Commit: `0796b57 docs(strategy): clean pivot trend analysis notebook`.
 - Verification: `poetry run python /tmp/verify_pivot_notebook.py` — passed (`NOTEBOOK_EXECUTION_OK`).
 - Runtime harness: N/A; this notebook is an offline analysis artifact.
 - Rollback boundary: revert `sorul_tradingbot/strategy/private/pivot_trend.ipynb` and this task document only.
