@@ -19,6 +19,7 @@ def strategy_factory(
   from sorul_tradingbot.strategy.private.volume_19 import Volume as Volume19
   from sorul_tradingbot.strategy.private.volume_20 import Volume as Volume20
   from sorul_tradingbot.strategy.private.pivot_trend import PivotTrend
+  from sorul_tradingbot.strategy.private.pivot_trend_2 import PivotTrend2
 
   for s in [
       TNT(mt_client),
@@ -30,6 +31,7 @@ def strategy_factory(
       Volume19(mt_client),
       Volume20(mt_client),
       PivotTrend(mt_client),
+      PivotTrend2(mt_client),
   ]:
     if s.strategy_name in strategy_name or strategy_name in s.strategy_name:
       return s

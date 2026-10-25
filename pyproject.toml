@@ -6,7 +6,7 @@ authors = ["sorul <cromerovargas2d@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = "3.11.0"
-tradeo = {path = "../tradeo", develop = true}
+tradeo = "==0.27.0"
 tqdm = "^4.67.1"
 urllib3 = "^2.6.3"
 
