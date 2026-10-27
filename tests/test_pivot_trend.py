@@ -1,4 +1,7 @@
+"""Regression tests for PivotTrend break-even and breakout behavior."""
+
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import numpy as np
 import pandas as pd
@@ -9,29 +12,113 @@ from sorul_tradingbot.strategy.private.pivot_trend import PivotTrend
 from sorul_tradingbot.strategy.simulator.simulator import SimulatedMTClient
 
 
-def _ohlc(*, closed_start, closed_penultimate, closed_last, entry, current_close):
-  """Build 49 closed M5 bars followed by the current open-only bar."""
-  closes = np.linspace(closed_start, closed_penultimate, 49)
-  closes[-1] = closed_last
-  all_closes = np.append(closes, current_close)
-  opens = np.append(closes, entry)
-  index = pd.date_range('2025-01-02 09:00', periods=50, freq='5min', tz='UTC')
-  frame = pd.DataFrame(
-      {
-          'open': opens,
-          'high': np.maximum(opens, all_closes) + 2.0,
-          'low': np.minimum(opens, all_closes) - 2.0,
-          'close': all_closes,
-          'volume': 100,
-      },
-      index=index,
+@pytest.mark.parametrize('buy', [True, False])
+def test_break_even_moves_stop_after_completed_close_reaches_entry_atr(buy):
+  """Move the stop after a completed close reaches the entry ATR threshold."""
+  strategy, order, ohlc = _filled_order_for_break_even(buy)
+  ohlc.datetime = np.array([
+      value + pd.Timedelta(minutes=5) for value in ohlc.datetime
+  ])
+  ohlc.close[-2] = order.price + (1.0 if buy else -1.0)
+  strategy._pivots = Mock(return_value=[])
+
+  strategy.indicator(ohlc, 'SP500', ohlc.datetime[-1])
+
+  assert order.stop_loss == order.price
+
+
+@pytest.mark.parametrize('buy', [True, False])
+def test_break_even_ignores_early_or_current_open_only_movement(buy):
+  """Ignore early and current open-only price movement for break-even."""
+  strategy, order, ohlc = _filled_order_for_break_even(buy)
+  initial_stop = order.stop_loss
+  ohlc.datetime = np.array([
+      value + pd.Timedelta(minutes=5) for value in ohlc.datetime
+  ])
+  ohlc.close[-2] = order.price + (0.99 if buy else -0.99)
+  ohlc.close[-1] = order.price + (100.0 if buy else -100.0)
+  ohlc.high[-1] = order.price + 100.0
+  ohlc.low[-1] = order.price - 100.0
+  strategy._pivots = Mock(return_value=[])
+
+  strategy.indicator(ohlc, 'SP500', ohlc.datetime[-1])
+
+  assert order.stop_loss == initial_stop
+
+
+def test_unfilled_order_atr_is_pruned_when_its_order_is_absent():
+  """Prune ATR metadata when the unfilled order is absent."""
+  strategy = _strategy_with_pivots([], [])
+  strategy._entry_atrs_by_magic['unfilled-order'] = 2.5
+  ohlc = _ohlc(
+      closed_start=100.0, closed_penultimate=105.0, closed_last=111.0,
+      entry=110.0, current_close=110.0,
   )
-  return OHLC(frame)
+
+  strategy.indicator(ohlc, 'SP500', ohlc.datetime[-1])
+
+  assert strategy._entry_atrs_by_magic == {}
+
+
+def test_pending_order_atr_is_retained_while_another_symbol_is_processed():
+  """Retain pending order ATR metadata for another symbol."""
+  pending = SimpleNamespace(
+      ticket=1,
+      magic='pending-other-symbol',
+      comment='PivotTrend v0.1',
+      symbol='NAS100',
+  )
+  strategy = PivotTrend(SimpleNamespace(open_orders=[pending]))
+  strategy._entry_atrs_by_magic[pending.magic] = 2.5
+  ohlc = _ohlc(
+      closed_start=100.0, closed_penultimate=105.0, closed_last=111.0,
+      entry=110.0, current_close=110.0,
+  )
+
+  strategy.indicator(ohlc, 'SP500', ohlc.datetime[-1])
+
+  assert strategy._entry_atrs_by_magic == {pending.magic: 2.5}
+
+
+@pytest.mark.parametrize(
+    'case',
+    [
+        pytest.param((
+            'BUY', 100.0, 105.0, 111.0, 110.0, 1.0,
+            [(108.0, 40), (106.0, 20)], [(95.0, 35), (94.0, 15)],
+        ), id='BUY'),
+        pytest.param((
+            'SELL', 110.0, 105.0, 99.0, 100.0, 1_000.0,
+            [(108.0, 40), (110.0, 20)], [(101.0, 35), (103.0, 15)],
+        ), id='SELL'),
+    ],
+)
+def test_indicator_allows_confirmed_breakout_regardless_of_prior_trend(case):
+  """Allow a confirmed breakout for both BUY and SELL directions."""
+  (
+      side, closed_start, closed_penultimate, closed_last, entry, current_close,
+      maxima, minima,
+  ) = case
+  ohlc = _ohlc(
+      closed_start=closed_start,
+      closed_penultimate=closed_penultimate,
+      closed_last=closed_last,
+      entry=entry,
+      current_close=current_close,
+  )
+  strategy = _strategy_with_pivots(maxima, minima)
+
+  order = strategy.indicator(ohlc, 'SP500', ohlc.datetime[-1])
+
+  assert order is not None
+  assert order.order_type.buy is (side == 'BUY')
 
 
 def _strategy_with_pivots(maxima, minima):
   strategy = PivotTrend(SimpleNamespace(open_orders=[]))
-  strategy._pivots = lambda _prices, kind: maxima if kind == 'max' else minima
+  strategy._pivots = lambda _prices, kind: (  # noqa: U101
+      maxima if kind == 'max' else minima
+  )
   return strategy
 
 
@@ -52,7 +139,9 @@ def _filled_order_for_break_even(buy):
         entry=100.0, current_close=100.0,
     )
   strategy = PivotTrend(client)
-  strategy._pivots = lambda _prices, kind: maxima if kind == 'max' else minima
+  strategy._pivots = lambda _prices, kind: (  # noqa: U101
+      maxima if kind == 'max' else minima
+  )
   order = strategy.indicator(ohlc, 'SP500', ohlc.datetime[-1])
   client.set_now(ohlc.datetime[-1])
   client.create_new_order(order)
@@ -61,98 +150,24 @@ def _filled_order_for_break_even(buy):
   return strategy, order, ohlc
 
 
-@pytest.mark.parametrize('buy', [True, False])
-def test_break_even_moves_stop_after_completed_close_reaches_entry_atr(buy):
-  strategy, order, ohlc = _filled_order_for_break_even(buy)
-  ohlc.datetime = np.array([
-      value + pd.Timedelta(minutes=5) for value in ohlc.datetime
-  ])
-  ohlc.close[-2] = order.price + (1.0 if buy else -1.0)
-  strategy._pivots = lambda _prices, _kind: []
-
-  strategy.indicator(ohlc, 'SP500', ohlc.datetime[-1])
-
-  assert order.stop_loss == order.price
-
-
-@pytest.mark.parametrize('buy', [True, False])
-def test_break_even_ignores_early_or_current_open_only_movement(buy):
-  strategy, order, ohlc = _filled_order_for_break_even(buy)
-  initial_stop = order.stop_loss
-  ohlc.datetime = np.array([
-      value + pd.Timedelta(minutes=5) for value in ohlc.datetime
-  ])
-  ohlc.close[-2] = order.price + (0.99 if buy else -0.99)
-  ohlc.close[-1] = order.price + (100.0 if buy else -100.0)
-  ohlc.high[-1] = order.price + 100.0
-  ohlc.low[-1] = order.price - 100.0
-  strategy._pivots = lambda _prices, _kind: []
-
-  strategy.indicator(ohlc, 'SP500', ohlc.datetime[-1])
-
-  assert order.stop_loss == initial_stop
-
-
-def test_unfilled_order_atr_is_pruned_when_its_order_is_absent():
-  strategy = _strategy_with_pivots([], [])
-  strategy._entry_atrs_by_magic['unfilled-order'] = 2.5
-  ohlc = _ohlc(
-      closed_start=100.0, closed_penultimate=105.0, closed_last=111.0,
-      entry=110.0, current_close=110.0,
+def _ohlc(*, closed_start, closed_penultimate, closed_last, entry,
+          current_close):
+  """Build 49 closed M5 bars followed by the current open-only bar."""
+  closes = np.linspace(closed_start, closed_penultimate, 49)
+  closes[-1] = closed_last
+  all_closes = np.append(closes, current_close)
+  opens = np.append(closes, entry)
+  index = pd.date_range(
+      '2025-01-02 09:00', periods=50, freq='5min', tz='UTC'
   )
-
-  strategy.indicator(ohlc, 'SP500', ohlc.datetime[-1])
-
-  assert strategy._entry_atrs_by_magic == {}
-
-
-def test_pending_order_atr_is_retained_while_another_symbol_is_processed():
-  pending = SimpleNamespace(
-      ticket=1,
-      magic='pending-other-symbol',
-      comment='PivotTrend v0.1',
-      symbol='NAS100',
+  frame = pd.DataFrame(
+      {
+          'open': opens,
+          'high': np.maximum(opens, all_closes) + 2.0,
+          'low': np.minimum(opens, all_closes) - 2.0,
+          'close': all_closes,
+          'volume': 100,
+      },
+      index=index,
   )
-  strategy = PivotTrend(SimpleNamespace(open_orders=[pending]))
-  strategy._entry_atrs_by_magic[pending.magic] = 2.5
-  ohlc = _ohlc(
-      closed_start=100.0, closed_penultimate=105.0, closed_last=111.0,
-      entry=110.0, current_close=110.0,
-  )
-
-  strategy.indicator(ohlc, 'SP500', ohlc.datetime[-1])
-
-  assert strategy._entry_atrs_by_magic == {pending.magic: 2.5}
-
-
-@pytest.mark.parametrize(
-    ('side', 'closed_start', 'closed_penultimate', 'closed_last', 'entry',
-     'current_close', 'maxima', 'minima'),
-    [
-        (
-            'BUY', 100.0, 105.0, 111.0, 110.0, 1.0,
-            [(108.0, 40), (106.0, 20)], [(95.0, 35), (94.0, 15)],
-        ),
-        (
-            'SELL', 110.0, 105.0, 99.0, 100.0, 1_000.0,
-            [(108.0, 40), (110.0, 20)], [(101.0, 35), (103.0, 15)],
-        ),
-    ],
-)
-def test_indicator_allows_confirmed_breakout_regardless_of_prior_trend(
-    side, closed_start, closed_penultimate, closed_last, entry, current_close,
-    maxima, minima,
-):
-  ohlc = _ohlc(
-      closed_start=closed_start,
-      closed_penultimate=closed_penultimate,
-      closed_last=closed_last,
-      entry=entry,
-      current_close=current_close,
-  )
-  strategy = _strategy_with_pivots(maxima, minima)
-
-  order = strategy.indicator(ohlc, 'SP500', ohlc.datetime[-1])
-
-  assert order is not None
-  assert order.order_type.buy is (side == 'BUY')
+  return OHLC(frame)
