@@ -36,6 +36,17 @@ is under `sorul_tradingbot/strategy/simulator/`.
 - Keep the stale-history and duplicate-entry fail-safes in live execution unless
   a focused test demonstrates the replacement behaviour.
 
+## Strategy version boundaries
+
+- Each strategy version must be self-contained: keep its complete
+  version-specific trading logic in that version's strategy file.
+- Do not import, inherit, or delegate trading behavior to another strategy
+  version or version-specific helper. Shared framework and library utilities
+  are fine, but must not hide version-specific behavior outside the file.
+- Simulator snapshots of a strategy file must remain reproducible without
+  other strategy files. Create a new version by copying and adapting the
+  existing implementation, then verify its imports and snapshot independence.
+
 ## Development and verification
 
 - Use Poetry and Python 3.11. Preserve the repository style: two-space
