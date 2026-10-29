@@ -9,7 +9,8 @@ from datetime import datetime
 from typing import List
 
 from sorul_tradingbot.strategy.private.volume_20 import Volume as Volume20
-from sorul_tradingbot.strategy.private.pivot_trend_2 import PivotTrend2
+from sorul_tradingbot.strategy.private.pivot_trend_2 import PivotTrend as PivotTrend2
+from sorul_tradingbot.strategy.private.pivot_trend_3 import PivotTrend as PivotTrend3
 
 
 class ForexEventHandler(EventHandler):
@@ -29,6 +30,7 @@ class ForexEventHandler(EventHandler):
     strategies: List[Strategy] = [
         Volume20(mt_client),
         PivotTrend2(mt_client),
+        PivotTrend3(mt_client),
     ]
     for strategy in strategies:
       possible_order = strategy.indicator(data, symbol, now_date)
