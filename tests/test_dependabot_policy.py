@@ -66,6 +66,61 @@ def test_accepts_grouped_dev_minor_and_major_updates() -> None:
   assert evaluate_candidate(candidate) == (True, 'eligible')  # noqa: SCS108
 
 
+def test_accepts_unchanged_constraint_lock_updates() -> None:
+  """Accept grouped lock bumps beyond the constraints changed in the PR."""
+  candidate = _partial_manifest_candidate()
+
+  assert evaluate_candidate(candidate) == (True, 'eligible')  # noqa: SCS108
+
+
+def test_rejects_missing_metadata_for_changed_dev_constraint() -> None:
+  """Require metadata for each direct dev constraint changed by the PR."""
+  candidate = _partial_manifest_candidate()
+  candidate['metadata'] = candidate['metadata'][1:]
+
+  eligible, reason = evaluate_candidate(candidate)
+
+  assert not eligible  # noqa: SCS108
+  assert reason == 'metadata_manifest_mismatch'  # noqa: SCS108
+
+
+def test_rejects_direct_lock_update_missing_from_metadata() -> None:
+  """Reject a direct dev lock bump omitted from grouped metadata."""
+  candidate = _partial_manifest_candidate()
+  candidate['metadata'] = candidate['metadata'][:1]
+
+  eligible, reason = evaluate_candidate(candidate)
+
+  assert not eligible  # noqa: SCS108
+  assert reason == 'unreported_direct_dev_update'  # noqa: SCS108
+
+
+def test_rejects_metadata_for_unchanged_locked_candidate() -> None:
+  """Reject metadata that claims an update without a corresponding lock bump."""
+  candidate = _partial_manifest_candidate()
+  candidate['base_pyproject']['tool']['poetry']['group']['dev'][
+    'dependencies'
+  ]['dev-helper'] = '^1.0'
+  candidate['head_pyproject']['tool']['poetry']['group']['dev'][
+    'dependencies'
+  ]['dev-helper'] = '^1.0'
+  candidate['base_lock']['package'].append(
+    _package('dev-helper', '1.0.0', ['dev']),
+  )
+  candidate['head_lock']['package'].append(
+    _package('dev-helper', '1.0.0', ['dev']),
+  )
+  candidate['metadata'].append(
+    _metadata('dev-helper', 'version-update:semver-patch', '1.0.1'),
+  )
+  candidate['metadata'][-1]['prevVersion'] = '1.0.0'
+
+  eligible, reason = evaluate_candidate(candidate)
+
+  assert not eligible  # noqa: SCS108
+  assert reason == 'locked_candidate_unchanged'  # noqa: SCS108
+
+
 def test_accepts_lock_only_direct_dev_update() -> None:
   """Allow a transitive lock change for a direct development update."""
   candidate = _candidate()
@@ -224,6 +279,36 @@ def test_rejects_installed_version_mismatch() -> None:
     lock,
     {'dev-lib': '2.9.0'},
   ) == (False, 'installed_version_mismatch')
+
+
+def _partial_manifest_candidate() -> dict:
+  candidate = _candidate()
+  dev_group = candidate['base_pyproject']['tool']['poetry']['group']['dev']
+  dev_dependencies = dev_group['dependencies']
+  dev_dependencies['notebook'] = '^7.5.1'
+  candidate['head_pyproject'] = deepcopy(candidate['base_pyproject'])
+  candidate['head_pyproject']['tool']['poetry']['group']['dev'][
+    'dependencies'
+  ]['dev-lib'] = '>=2.5,<4'
+  _set_locked_version(candidate['head_lock'], 'dev-lib', '3.1.0')
+  candidate['base_lock']['package'].append(
+    _package('notebook', '7.6.3', ['dev']),
+  )
+  candidate['head_lock']['package'].append(
+    _package('notebook', '7.6.5', ['dev']),
+  )
+  candidate['head_lock']['metadata']['content-hash'] = 'head-hash'
+  candidate['files'] = [
+    {'filename': 'pyproject.toml', 'status': 'modified'},
+    {'filename': 'poetry.lock', 'status': 'modified'},
+  ]
+  candidate['pr']['changed_files'] = 2
+  candidate['metadata'] = [
+    _metadata('dev-lib', 'version-update:semver-major', '3.1.0'),
+    _metadata('notebook', 'version-update:semver-patch', '7.6.5'),
+  ]
+  candidate['metadata'][1]['prevVersion'] = '7.6.3'
+  return candidate
 
 
 def _candidate() -> dict:

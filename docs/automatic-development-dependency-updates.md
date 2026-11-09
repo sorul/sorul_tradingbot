@@ -54,13 +54,16 @@ An auto-merge request is considered only when all of these conditions hold:
   is in scope. A manifest change must be a change to existing direct-dev
   version constraints only; additions, removals, markers, extras, sources,
   runtime changes, and other manifest edits stay manual.
-- When the manifest changes, its changed dependency names must match the
-  metadata entries. The metadata update type must match the semver class of the
-  actual old-to-new lock transition; concrete stable three-component versions
-  in the metadata must match those lock versions. Constraint strings do not
-  identify the resolved candidate—the lock does. The locked candidate must be
-  a strictly higher stable three-component version. Unsupported lock versions
-  and mismatches stay manual. A changed manifest requires a changed lock.
+- When the manifest changes, every changed dependency name must appear in the
+  metadata. Additional metadata entries are allowed only for existing direct-
+  dev dependencies whose constraints did not change and whose locked versions
+  really did update. No changed direct-dev lock version may be unexplained by
+  metadata. The metadata update type must match the semver class of the actual
+  old-to-new lock transition; concrete stable three-component versions in the
+  metadata must match those lock versions. Constraint strings do not identify
+  the resolved candidate—the lock does. The locked candidate must be a strictly
+  higher stable three-component version. Unsupported lock versions and
+  mismatches stay manual. A changed manifest requires a changed lock.
   Lock-only PRs may qualify if all metadata entries are eligible.
 - Every package in the lock's production (`main`) graph remains identical.
   This includes packages shared between the runtime and dev groups.

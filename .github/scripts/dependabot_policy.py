@@ -128,21 +128,15 @@ def evaluate_candidate(candidate: dict) -> tuple[bool, str]:
     _validate_files(files, pr)
     _validate_commit(candidate.get('commits'), pr)
     metadata = _validate_metadata(candidate.get('metadata'))
-
     base_pyproject = _mapping(candidate.get('base_pyproject'))
     head_pyproject = _mapping(candidate.get('head_pyproject'))
-    changed_dependencies = _validate_pyproject(base_pyproject, head_pyproject)
-    paths = {item['filename'] for item in files}
-    _require(
-      ('pyproject.toml' in paths) == bool(changed_dependencies),
-      'manifest_change_mismatch',
+    changed_dependencies, direct_dev_names = _validate_manifest_metadata(
+      metadata,
+      base_pyproject,
+      head_pyproject,
+      files,
     )
     metadata_names = {item['name'] for item in metadata}
-    if changed_dependencies:
-      _require(
-        metadata_names == changed_dependencies,
-        'metadata_manifest_mismatch',
-      )
 
     base_lock = _mapping(candidate.get('base_lock'))
     head_lock = _mapping(candidate.get('head_lock'))
@@ -150,6 +144,12 @@ def evaluate_candidate(candidate: dict) -> tuple[bool, str]:
     base_main, base_dev = _lock_indexes(base_lock)
     head_main, head_dev = _lock_indexes(head_lock)
     _require(base_main == head_main, 'production_lock_changed')
+    _validate_reported_direct_dev_updates(
+      direct_dev_names,
+      metadata_names,
+      base_dev,
+      head_dev,
+    )
     _validate_updated_packages(metadata, base_dev, head_dev)
     return True, 'eligible'
   except Rejected as error:
@@ -162,6 +162,37 @@ def evaluate_candidate(candidate: dict) -> tuple[bool, str]:
     tomllib.TOMLDecodeError,
   ):
     return False, 'invalid_or_ambiguous_input'
+
+
+def _validate_manifest_metadata(
+  metadata: list[dict],
+  base_pyproject: dict,
+  head_pyproject: dict,
+  files: list[dict],
+) -> tuple[set[str], set[str]]:
+  changed = _validate_pyproject(base_pyproject, head_pyproject)
+  paths = {item['filename'] for item in files}
+  _require(
+    ('pyproject.toml' in paths) == bool(changed),
+    'manifest_change_mismatch',
+  )
+  metadata_names = {item['name'] for item in metadata}
+  _require(changed <= metadata_names, 'metadata_manifest_mismatch')
+  direct_names = set(_normalized_keys(_dev_dependencies(head_pyproject)))
+  _require(metadata_names <= direct_names, 'metadata_not_direct_dev')
+  return changed, direct_names
+
+
+def _validate_reported_direct_dev_updates(
+  direct_names: set[str],
+  metadata_names: set[str],
+  base_dev: dict[str, list[dict]],
+  head_dev: dict[str, list[dict]],
+) -> None:
+  for name in direct_names - metadata_names:
+    old_versions = [item['version'] for item in base_dev.get(name, [])]
+    new_versions = [item['version'] for item in head_dev.get(name, [])]
+    _require(old_versions == new_versions, 'unreported_direct_dev_update')
 
 
 def verify_installed(
