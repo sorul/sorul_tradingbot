@@ -15,8 +15,12 @@ def strategy_factory(
   from sorul_tradingbot.strategy.private.volume_19 import Volume as Volume19
   from sorul_tradingbot.strategy.private.volume_20 import Volume as Volume20
   from sorul_tradingbot.strategy.private.pivot_trend import PivotTrend
-  from sorul_tradingbot.strategy.private.pivot_trend_2 import PivotTrend as PivotTrend2
-  from sorul_tradingbot.strategy.private.pivot_trend_3 import PivotTrend as PivotTrend3
+  from sorul_tradingbot.strategy.private.pivot_trend_2 import (
+      PivotTrend as PivotTrend2,
+  )
+  from sorul_tradingbot.strategy.private.pivot_trend_3 import (
+      PivotTrend as PivotTrend3,
+  )
 
   for s in [
       TNT(mt_client),
