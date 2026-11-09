@@ -2,60 +2,114 @@ name: Dependabot Auto Merge
 
 on:
   pull_request_target:
+    branches: [master]
     types: [opened, reopened, synchronize, ready_for_review]
 
 permissions:
   contents: read
-  pull-requests: read
+  pull-requests: write
+
+concurrency:
+  group: dependabot-policy-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
 
 jobs:
-  enable-auto-merge:
-    if: >-
-      vars.DEPENDABOT_AUTOMERGE_ENABLED == 'true' &&
-      github.event.pull_request.user.login == 'dependabot[bot]' &&
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
+  guard:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: read
       pull-requests: write
     steps:
-      - name: Read update metadata
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.0'
+      - name: Read and clear any prior auto-merge request
+        id: clear-auto
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          pending=$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER" --jq '.auto_merge != null')
+          if [ "$pending" = true ]; then
+            gh pr merge "$PR_NUMBER" --repo "$GH_REPO" --disable-auto
+          fi
+          pending=$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER" --jq '.auto_merge != null')
+          if [ "$pending" != false ]; then
+            echo 'Could not confirm prior auto-merge was cleared.' >&2
+            exit 1
+          fi
+      - name: Read trusted Dependabot metadata
         id: metadata
         uses: dependabot/fetch-metadata@v3
-        with:
-          github-token: ${{ github.token }}
-
-      - name: Require development-only patch or minor updates
-        env:
-          UPDATED_DEPENDENCIES: ${{ steps.metadata.outputs.updated-dependencies-json }}
-        run: |
-          jq -e '
-            type == "array" and length > 0 and
-            all(.[];
-              .dependencyType == "direct:development" and
-              .packageEcosystem == "pip" and
-              .directory == "/" and
-              (.updateType == "version-update:semver-patch" or
-               .updateType == "version-update:semver-minor")
-            )
-          ' <<< "$UPDATED_DEPENDENCIES" >/dev/null
-
-      - name: Require development requirements file only
+        continue-on-error: true
+      - name: Capture fresh PR data and validate candidate
+        id: policy
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPOSITORY: ${{ github.repository }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
+          EVENT_BASE: ${{ github.event.pull_request.base.sha }}
+          OPT_IN: ${{ vars.DEPENDABOT_AUTOMERGE_ENABLED }}
+          METADATA_OUTCOME: ${{ steps.metadata.outcome }}
+          UPDATED_JSON: ${{ steps.metadata.outputs.updated-dependencies-json }}
         run: |
-          gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json files \
-            --jq '.files | length > 0 and all(.[]; .path == "requirements_dev.txt")' \
-            | grep -qx true
-
-      - name: Request auto-merge for the observed head
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT
+          [[ "$EVENT_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EVENT_BASE" =~ ^[0-9a-f]{40}$ ]]
+          gh api "repos/$GH_REPO/pulls/$PR_NUMBER" > "$tmp/pr.json"
+          gh api "repos/$GH_REPO/pulls/$PR_NUMBER/files?per_page=3" > "$tmp/files.json"
+          gh api "repos/$GH_REPO/pulls/$PR_NUMBER/commits?per_page=2" > "$tmp/commits.json"
+          printf '%s' "$UPDATED_JSON" > "$tmp/metadata.json"
+          for rev in "$EVENT_BASE" "$EVENT_HEAD"; do
+            for path in pyproject.toml poetry.lock; do
+              safe=$(printf '%s' "$path" | tr '/.' '__')
+              gh api "repos/$GH_REPO/contents/$path?ref=$rev" \
+                --jq '.content' | base64 --decode > "$tmp/${rev}_${safe}"
+            done
+          done
+          python .github/scripts/dependabot_policy.py validate \
+            --event "$GITHUB_EVENT_PATH" --pull-request "$tmp/pr.json" \
+            --files "$tmp/files.json" --commits "$tmp/commits.json" \
+            --metadata "$tmp/metadata.json" \
+            --base-pyproject "$tmp/${EVENT_BASE}_pyproject_toml" \
+            --head-pyproject "$tmp/${EVENT_HEAD}_pyproject_toml" \
+            --base-lock "$tmp/${EVENT_BASE}_poetry_lock" \
+            --head-lock "$tmp/${EVENT_HEAD}_poetry_lock" \
+            --opt-in "$OPT_IN" --metadata-verified "$METADATA_OUTCOME" \
+            --output "$GITHUB_OUTPUT"
+      - name: Request guarded native auto-merge
+        if: steps.policy.outputs.eligible == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPOSITORY: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: >-
-          gh pr merge "$PR_NUMBER" --repo "$REPOSITORY" --auto --merge
-          --match-head-commit "$HEAD_SHA"
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gh pr merge "$PR_NUMBER" --repo "$GH_REPO" --auto --merge \
+            --match-head-commit "$EVENT_HEAD"
+
+  policy:
+    if: always()
+    needs: [guard]
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: Require the Dependabot guard to complete
+        env:
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          GUARD_RESULT: ${{ needs.guard.result }}
+        run: |
+          if [ "$AUTHOR" = 'dependabot[bot]' ] && [ "$GUARD_RESULT" != success ]; then
+            echo 'The Dependabot safety guard did not complete successfully.' >&2
+            exit 1
+          fi

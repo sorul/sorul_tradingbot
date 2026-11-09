@@ -15,8 +15,8 @@ requirements:
 	poetry export -f requirements.txt --output requirements.txt --without-hashes
 
 dev_requirements:
-	poetry lock
-	poetry export --with dev -f requirements.txt --output requirements_dev.txt --without-hashes
+	poetry check --lock
+	poetry export --with dev -f requirements.txt --output requirements_dev.txt --without-hashes --without-urls
 
 push_develop:
 	@poetry update
