@@ -40,19 +40,19 @@
       "id": "SimulatorDataFile",
       "type": "promptString",
       "description": "Ruta al CSV a usar en el simulador",
-      "default": "sorul_tradingbot/strategy/simulator/data/sp500_2025.csv"
+      "default": "sorul_tradingbot/strategy/simulator/data/sp500_mt.csv"
     },
     {
       "id": "SimulatorStrategyModule",
       "type": "promptString",
-      "description": "Ruta del módulo de estrategia (p.ej. sorul_tradingbot.strategy.private.volume_20)",
-      "default": "sorul_tradingbot.strategy.private.volume_20"
+      "description": "Ruta del módulo de estrategia (p.ej. sorul_tradingbot.strategy.private.pivot_trend_2)",
+      "default": "sorul_tradingbot.strategy.private.pivot_trend_2"
     },
     {
       "id": "SimulatorStrategyClass",
       "type": "promptString",
       "description": "Nombre de la clase de estrategia (p.ej. Volume o PivotTrend)",
-      "default": "Volume"
+      "default": "PivotTrend"
     },
     {
       "id": "SimulatorDescription",
