@@ -6,6 +6,7 @@
 from pathlib import Path
 import re
 import tomllib
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,6 +70,23 @@ def test_dependency_ci_uses_poetry_lock_without_local_dev_export() -> None:
   assert install.index('poetry check --lock') < install.index(  # noqa: SCS108
     'poetry install --with dev --no-interaction',
   )
+
+
+def test_dependabot_write_permissions_are_scoped_to_guard_job() -> None:
+  """Grant content writes only to the privileged auto-merge guard."""
+  workflow = yaml.safe_load(
+    (ROOT / '.github/workflows/dependabot-auto-merge.yml').read_text(),
+  )
+
+  assert workflow['permissions'] == {  # noqa: SCS108
+    'contents': 'read',
+    'pull-requests': 'write',
+  }
+  assert workflow['jobs']['guard']['permissions'] == {  # noqa: SCS108
+    'contents': 'write',
+    'pull-requests': 'write',
+  }
+  assert workflow['jobs']['policy']['permissions'] == {}  # noqa: SCS108
 
 
 def _canonical_name(name: str) -> str:
